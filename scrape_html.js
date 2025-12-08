@@ -35,6 +35,31 @@ function norm(s) {
     .toLowerCase();
 }
 
+/* -------------------------------------------------------------------------- */
+/* ✅ HELPERS AUTOCOMPLETE (COMMIT REAL + VALIDACIÓN)                          */
+/* -------------------------------------------------------------------------- */
+
+function tokensOf(s) {
+  return norm(s).split(" ").filter(Boolean);
+}
+
+function valueMatchesAllTokens(value, wanted) {
+  const v = norm(value);
+  const toks = tokensOf(wanted);
+  return toks.every((t) => v.includes(t));
+}
+
+function buildAutocompleteQuery(wantedRaw) {
+  const toks = tokensOf(wantedRaw);
+  if (toks.length <= 1) return wantedRaw;
+
+  const stop = new Set(["zonal", "planta", "localidad", "sucursal"]);
+  const filtered = toks.filter((t) => !stop.has(t));
+
+  if (filtered.length) return filtered.join(" ");
+  return toks.slice(-2).join(" ");
+}
+
 // Click por texto (robusto para SPA / botones sin id)
 async function clickByText(page, text, { timeout = 30000 } = {}) {
   const wanted = norm(text);
@@ -235,7 +260,6 @@ async function selectInAdminModalByLabel(page, labelIncludes, wantedTextOrValue,
 
       const opts = Array.from(sel.querySelectorAll("option"));
 
-      // 1) si el valor parece numérico o coincide con value exacto => usar value
       const wantedLooksValue =
         /^[0-9]+$/.test(String(wantedRaw).trim()) ||
         opts.some((o) => String(o.value) === String(wantedRaw).trim());
@@ -246,7 +270,6 @@ async function selectInAdminModalByLabel(page, labelIncludes, wantedTextOrValue,
         match = opts.find((o) => String(o.value) === String(wantedRaw).trim());
       }
 
-      // 2) si no, buscar por texto
       if (!match) {
         match = opts.find((o) => norm2(o.textContent).includes(wantedNorm));
       }
@@ -279,21 +302,22 @@ async function selectInAdminModalByLabel(page, labelIncludes, wantedTextOrValue,
 }
 
 /**
- * ✅ NUEVO: Sucursal es AUTOCOMPLETE (input), NO select en el modal.
- * Escribe el texto y selecciona del dropdown si aparece (si no, Enter).
+ * ✅ Sucursal AUTOCOMPLETE: COMMIT real (click o Enter) + validación de que quedó.
+ * (evita que se quede en "ZONAL")
+ *
+ * Opcional en .env:
+ *   AUTOCOMPLETE_WAIT_MS=900
  */
 async function setAutocompleteInAdminModalByLabel(page, labelIncludes, wantedText, { timeout = 25000 } = {}) {
   const labelNorm = norm(labelIncludes);
   const wantedRaw = String(wantedText || "").trim();
   if (!wantedRaw) return;
 
-  // Espera modal visible
   await page.waitForFunction(() => {
     const modal = document.querySelector("#adminUsersModal.modal.show") || document.querySelector(".modal.show");
     return !!modal;
   }, { timeout });
 
-  // Marca el input del grupo "Sucursal" dentro del modal
   const found = await page.evaluate(({ labelNorm }) => {
     const modal = document.querySelector("#adminUsersModal.modal.show") || document.querySelector(".modal.show");
     if (!modal) return { ok: false, reason: "No hay modal visible" };
@@ -319,79 +343,132 @@ async function setAutocompleteInAdminModalByLabel(page, labelIncludes, wantedTex
     if (!inp) return { ok: false, reason: "No hay input[type=text] en el grupo" };
 
     inp.setAttribute("data-autofill", "target");
-    return { ok: true, placeholder: inp.getAttribute("placeholder") || "" };
+    return { ok: true };
   }, { labelNorm });
 
   if (!found.ok) throw new Error(found.reason);
 
   const inputSel = '#adminUsersModal [data-autofill="target"], .modal.show [data-autofill="target"]';
-
   await page.waitForSelector(inputSel, { timeout: 15000 });
 
-  // Tipea como usuario para disparar el autocomplete
-  await page.click(inputSel, { clickCount: 3 });
-  await page.keyboard.press("Backspace");
-  await page.type(inputSel, wantedRaw, { delay: 35 });
-  await sleep(350);
+  const tries = [buildAutocompleteQuery(wantedRaw), wantedRaw];
 
-  // Intenta clickear opción visible del autocomplete
-  const picked = await page.evaluate((wantedNorm) => {
-    const norm2 = (s) =>
-      String(s || "")
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/\s+/g, " ")
-        .trim()
-        .toLowerCase();
+  try {
+    for (let attempt = 0; attempt < tries.length; attempt++) {
+      const query = tries[attempt];
 
-    const isVisible = (el) => {
-      if (!el) return false;
-      const r = el.getBoundingClientRect();
-      return r.width > 0 && r.height > 0;
-    };
+      await page.click(inputSel, { clickCount: 3 });
+      await page.keyboard.press("Backspace");
+      await page.type(inputSel, query, { delay: 35 });
 
-    const candidates = Array.from(
-      document.querySelectorAll(`
-        .dropdown-menu.show * ,
-        ul[role="listbox"] li,
-        [role="option"],
-        .ng-dropdown-panel .ng-option,
-        .mat-autocomplete-panel mat-option,
-        .autocomplete-items * ,
-        .typeahead * 
-      `)
-    );
+      await sleep(Number(process.env.AUTOCOMPLETE_WAIT_MS || 900));
 
-    const item = candidates.find((el) => isVisible(el) && norm2(el.textContent).includes(wantedNorm));
-    if (item) {
-      item.scrollIntoView({ block: "center" });
-      item.click();
-      return { ok: true, text: (item.textContent || "").trim() };
+      // A) intentar click en opción visible
+      const clicked = await page.evaluate((wantedRaw) => {
+        const norm2 = (s) =>
+          String(s || "")
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .toLowerCase();
+
+        const wantedNorm = norm2(wantedRaw);
+        const tokens = wantedNorm.split(" ").filter(Boolean);
+
+        const isVisible = (el) => {
+          if (!el) return false;
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0;
+        };
+
+        const nodes = Array.from(
+          document.querySelectorAll(`
+            ngb-typeahead-window .dropdown-item,
+            ngb-typeahead-window button,
+            .dropdown-menu.show .dropdown-item,
+            .dropdown-menu.show button,
+            typeahead-container button,
+            typeahead-container li,
+            .typeahead-container button,
+            .typeahead-container li,
+            ul[role="listbox"] [role="option"],
+            [role="option"],
+            .ng-dropdown-panel .ng-option,
+            .mat-autocomplete-panel mat-option,
+            .autocomplete-items * ,
+            .autocomplete-suggestions *
+          `)
+        ).filter(isVisible);
+
+        const score = (el) => {
+          const t = norm2(el.textContent || "");
+          if (!t) return 0;
+          let s = 0;
+          for (const tok of tokens) if (t.includes(tok)) s++;
+          if (wantedNorm && t.includes(wantedNorm)) s += 2;
+          if (wantedNorm && t === wantedNorm) s += 3;
+          return s;
+        };
+
+        let best = null, bestScore = 0;
+        for (const el of nodes) {
+          const sc = score(el);
+          if (sc > bestScore) {
+            best = el;
+            bestScore = sc;
+          }
+        }
+
+        if (!best || bestScore === 0) return { ok: false, count: nodes.length };
+
+        best.scrollIntoView({ block: "center" });
+        best.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+        best.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+        best.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+        best.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+        return { ok: true, text: (best.textContent || "").trim(), score: bestScore };
+      }, wantedRaw);
+
+      if (clicked.ok) {
+        await sleep(300);
+      } else {
+        // B) fallback: ArrowDown + Enter (muchos autocompletes solo comitean así)
+        for (let k = 0; k < 6; k++) {
+          await page.keyboard.press("ArrowDown");
+          await sleep(80);
+          await page.keyboard.press("Enter");
+          await sleep(350);
+
+          const val = await page.$eval(inputSel, (el) => el.value || "");
+          if (valueMatchesAllTokens(val, wantedRaw)) break;
+        }
+      }
+
+      // validar que quedó seleccionado
+      const finalVal = await page.$eval(inputSel, (el) => el.value || "");
+      if (valueMatchesAllTokens(finalVal, wantedRaw)) {
+        // blur para que el UI aplique dependencias
+        await page.keyboard.press("Tab");
+        await sleep(200);
+
+        const afterBlur = await page.$eval(inputSel, (el) => el.value || "");
+        if (valueMatchesAllTokens(afterBlur, wantedRaw)) {
+          console.log(`✅ Sucursal COMMIT OK: "${afterBlur}"`);
+          return;
+        }
+      }
     }
 
-    const visible = candidates
-      .filter(isVisible)
-      .map((el) => (el.textContent || "").trim())
-      .filter(Boolean)
-      .slice(0, 12);
-
-    return { ok: false, visible };
-  }, norm(wantedRaw));
-
-  if (!picked.ok) {
-    console.log("⚠️ No vi dropdown del autocomplete. Intento Enter. Opciones visibles:", picked.visible || []);
-    await page.keyboard.press("Enter");
+    throw new Error(`❌ No se pudo COMMIT-ejar la sucursal "${wantedRaw}" (se queda en valor inválido/por defecto).`);
+  } finally {
+    // Limpia el marcador SIEMPRE
+    await page.evaluate(() => {
+      const el = document.querySelector('[data-autofill="target"]');
+      if (el) el.removeAttribute("data-autofill");
+    });
   }
-
-  // Sale del input para que el UI aplique dependencias
-  await page.keyboard.press("Tab");
-  await sleep(150);
-
-  // Limpia el marcador
-  await page.evaluate(() => {
-    const el = document.querySelector('[data-autofill="target"]');
-    if (el) el.removeAttribute("data-autofill");
-  });
 }
 
 // Tipo usuario (por label) => SELECT
@@ -401,10 +478,10 @@ async function selectTipoUsuario(page) {
   console.log(`✅ Tipo de usuario: ${r.text} (value=${r.value})`);
 }
 
-// ✅ Sucursal (AUTOCOMPLETE INPUT) => prioriza texto
+// ✅ Sucursal (AUTOCOMPLETE INPUT) => COMMIT real
 async function selectSucursal(page) {
   const textEnv = (process.env.NEW_USER_SUCURSAL || "").trim();        // ej: "ZONAL BOLOGNESI"
-  const valueEnv = (process.env.NEW_USER_SUCURSAL_VALUE || "").trim(); // ej: "6" (fallback)
+  const valueEnv = (process.env.NEW_USER_SUCURSAL_VALUE || "").trim(); // fallback (si lo usas)
 
   const wanted = textEnv || valueEnv;
   if (!wanted) {
@@ -413,7 +490,7 @@ async function selectSucursal(page) {
   }
 
   await setAutocompleteInAdminModalByLabel(page, "sucursal", wanted, { timeout: 25000 });
-  console.log(`✅ Sucursal seteada (autocomplete): ${wanted}`);
+  console.log(`✅ Sucursal seteada (autocomplete, texto pedido): ${wanted}`);
 }
 
 // Forzar valor estable para código (por si el UI lo pisa)
@@ -473,7 +550,7 @@ async function fillCreateUserFromEnv(page) {
   // 1) Tipo usuario (SELECT)
   await selectTipoUsuario(page);
 
-  // 2) Sucursal (AUTOCOMPLETE INPUT)
+  // 2) Sucursal (AUTOCOMPLETE INPUT) ✅ COMMIT
   await selectSucursal(page);
 
   // pequeña pausa para que el UI aplique dependencias
@@ -559,7 +636,6 @@ async function clickButtonInContainerByText(page, containerSelector, textWanted,
 
       btn.scrollIntoView({ block: "center", inline: "center" });
 
-      // click agresivo (rápido)
       btn.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
       btn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
       btn.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
@@ -582,7 +658,6 @@ async function clickButtonInContainerByText(page, containerSelector, textWanted,
 
 // Click del botón (fa-list) "Módulos" SOLO SI NO ESTÁ ABIERTO
 async function clickModulosButton(page, { timeout = 20000 } = {}) {
-  // ✅ si ya está abierto, NO volver a abrir
   if (await isBootstrapModalOpen(page, "#modulesModal")) {
     console.log("ℹ️ modulesModal ya está abierto -> no se vuelve a abrir.");
     return;
@@ -660,7 +735,6 @@ async function clickModulosButton(page, { timeout = 20000 } = {}) {
 
   if (!result.ok) throw new Error("No se pudo clickear Módulos: " + (result.reason || "sin detalle"));
 
-  // esperar que aparezca
   await page.waitForFunction(() => {
     const m = document.querySelector("#modulesModal");
     if (!m) return false;
@@ -670,7 +744,6 @@ async function clickModulosButton(page, { timeout = 20000 } = {}) {
     return isShown || isDisplayed;
   }, { timeout: 20000 });
 
-  // esperar filas
   await page.waitForFunction(() => {
     const modal = document.querySelector("#modulesModal");
     if (!modal) return false;
@@ -830,7 +903,7 @@ async function clickGuardarModulesModal(page, { timeout = 12000 } = {}) {
     });
 
     if (res.ok) {
-      await sleep(Number(process.env.SAVE_WAIT_MS || 600)); // ✅ más rápido
+      await sleep(Number(process.env.SAVE_WAIT_MS || 600));
       return;
     }
 
@@ -1088,13 +1161,11 @@ async function clickCrearUsuarioSiCorresponde(page) {
   const VIEWPORT_HEIGHT = parseInt(process.env.VIEWPORT_HEIGHT || "864", 10);
   const DEVICE_SCALE_FACTOR = parseFloat(process.env.DEVICE_SCALE_FACTOR || "1");
 
-  // Permisos MÓDULOS
   const PERMISOS_DIR = path.join(process.cwd(), "permisos_modulos");
   const envFile = (process.env.PERMISOS_FILE || "").trim();
   const permisosFileName = envFile || "branch.json";
   const permisosPath = path.join(PERMISOS_DIR, path.basename(permisosFileName));
 
-  // Permisos CAMPOS
   const CAMPOS_DIR = path.join(process.cwd(), "permisos_campossap");
   const camposEnvFile = (process.env.CAMPOS_FILE || "").trim();
   const camposFileName = camposEnvFile || "branch.json";
@@ -1237,7 +1308,7 @@ async function clickCrearUsuarioSiCorresponde(page) {
     await sleep(250);
     await snapshot(page, outDir, "modulos_aplicado");
 
-    await clickGuardarModulesModal(page); // ✅ más rápido
+    await clickGuardarModulesModal(page);
     await snapshot(page, outDir, "modulos_guardado");
   }
 
@@ -1245,10 +1316,8 @@ async function clickCrearUsuarioSiCorresponde(page) {
   // ✅ CAMPOS SAP + DATOS ARTÍCULOS + GUARDAR (MÁS RÁPIDO)
   // ----------------------
   try {
-    // SOCIOS DE NEGOCIOS
     const bpCatalog = await extractCamposSAPGeneric(page, "#ModulosSociosDeNegocios");
 
-    // ARTÍCULOS
     try {
       await activateTabByText(page, "Datos de artículos");
     } catch {}
@@ -1279,11 +1348,9 @@ async function clickCrearUsuarioSiCorresponde(page) {
       const rawCampos = await fs.readJson(camposPath);
       const templateObj = normalizeCamposTemplateToObject(rawCampos);
 
-      // aplicar socios
       const logsBP = await applyCamposTemplateGeneric(page, "#ModulosSociosDeNegocios", templateObj);
       console.log(`🧩 CAMPOS SOCIOS aplicados. Filas tocadas: ${logsBP.touched}`);
 
-      // aplicar artículos
       try {
         await activateTabByText(page, "Datos de artículos");
       } catch {}
@@ -1294,7 +1361,6 @@ async function clickCrearUsuarioSiCorresponde(page) {
       await snapshot(page, outDir, "campos_aplicado_todos");
 
       if (AUTO_SAVE_CAMPOS) {
-        // Guardar Socios
         try {
           await activateTabByText(page, "Campos SAP");
         } catch {}
@@ -1304,7 +1370,6 @@ async function clickCrearUsuarioSiCorresponde(page) {
         await sleep(Number(process.env.SAVE_WAIT_MS || 600));
         await snapshot(page, outDir, "guardar_campos_socios");
 
-        // Guardar Artículos
         try {
           await activateTabByText(page, "Datos de artículos");
         } catch {}
