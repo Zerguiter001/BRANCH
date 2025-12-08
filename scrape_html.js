@@ -36,7 +36,7 @@ function norm(s) {
 }
 
 // Click por texto (robusto para SPA / botones sin id)
-async function clickByText(page, text, { timeout = 60000 } = {}) {
+async function clickByText(page, text, { timeout = 30000 } = {}) {
   const wanted = norm(text);
 
   await page.waitForFunction(
@@ -76,7 +76,6 @@ async function clickByText(page, text, { timeout = 60000 } = {}) {
     if (!el) throw new Error("No encontrado por texto: " + wanted);
 
     el.scrollIntoView({ block: "center", inline: "center" });
-
     el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
     el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
@@ -85,9 +84,7 @@ async function clickByText(page, text, { timeout = 60000 } = {}) {
 }
 
 /**
- * ✅ Snapshot mejorado:
- * - Fuerza overflow-x visible
- * - Ajusta viewport al ancho real del documento (hasta maxWidth)
+ * Snapshot (igual)
  */
 async function snapshot(page, outDir, prefix, { maxWidth = 2400 } = {}) {
   const stamp = ts();
@@ -118,7 +115,7 @@ async function snapshot(page, outDir, prefix, { maxWidth = 2400 } = {}) {
         height: targetH,
         deviceScaleFactor: vp.deviceScaleFactor || 1,
       });
-      await sleep(200);
+      await sleep(120);
     }
   } catch {}
 
@@ -134,10 +131,10 @@ async function snapshot(page, outDir, prefix, { maxWidth = 2400 } = {}) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* ✅ SET VALUE ROBUSTO (React/Angular/inputs controlados)                      */
+/* SET VALUE ROBUSTO                                                          */
 /* -------------------------------------------------------------------------- */
 
-async function setInputValueNative(page, selector, value, { timeout = 20000 } = {}) {
+async function setInputValueNative(page, selector, value, { timeout = 15000 } = {}) {
   if (value === undefined || value === null) return;
 
   await page.waitForSelector(selector, { timeout });
@@ -147,7 +144,6 @@ async function setInputValueNative(page, selector, value, { timeout = 20000 } = 
       const el = document.querySelector(selector);
       if (!el) return { ok: false, reason: "No existe selector" };
 
-      // Setter nativo (clave para inputs controlados por frameworks)
       const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
       const desc = Object.getOwnPropertyDescriptor(proto, "value");
       const setter = desc && desc.set;
@@ -167,182 +163,330 @@ async function setInputValueNative(page, selector, value, { timeout = 20000 } = 
 
   if (!ok?.ok) {
     console.log(`⚠️ setInputValueNative fallo en ${selector}:`, ok?.reason || "sin detalle");
-  } else {
-    // Si el sistema te lo recorta, lo vemos aquí
-    if (String(value) !== String(ok.now)) {
-      console.log(`⚠️ Valor diferente en ${selector}. Deseado="${value}" / Actual="${ok.now}"`);
-    }
+  } else if (String(value) !== String(ok.now)) {
+    console.log(`⚠️ Valor diferente en ${selector}. Deseado="${value}" / Actual="${ok.now}"`);
   }
 }
 
-// Fallback: escribir con teclado (si el setter nativo no alcanza)
-async function typeSlow(page, selector, value, { delay = 35 } = {}) {
+async function typeSlow(page, selector, value, { delay = 25 } = {}) {
   if (!value) return;
-  await page.waitForSelector(selector, { timeout: 20000 });
+  await page.waitForSelector(selector, { timeout: 15000 });
   await page.click(selector, { clickCount: 3 });
   await page.keyboard.press("Backspace");
   await page.type(selector, value, { delay });
 }
 
 /* -------------------------------------------------------------------------- */
-/* ✅ MODAL "Crear usuario": Tipo usuario (select) + Sucursal (input)           */
+/* FIX: NO ABRIR 2 VECES MODAL MÓDULOS                                         */
 /* -------------------------------------------------------------------------- */
 
-async function selectTipoUsuarioBranch(page, { timeout = 30000 } = {}) {
-  // En tu HTML existe: select#selectDocTypeDocumentSearch con opción "BRANCH"
-  await page.waitForSelector("#selectDocTypeDocumentSearch", { timeout });
-
-  const wanted = norm(process.env.NEW_USER_TIPO || "BRANCH");
-
-  const res = await page.evaluate((wanted) => {
-    const sel = document.querySelector("#selectDocTypeDocumentSearch");
-    if (!sel) return { ok: false, reason: "No existe #selectDocTypeDocumentSearch" };
-
-    const norm2 = (s) =>
-      String(s || "")
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/\s+/g, " ")
-        .trim()
-        .toLowerCase();
-
-    const opts = Array.from(sel.querySelectorAll("option"));
-    const match = opts.find((o) => norm2(o.textContent).includes(wanted));
-    if (!match) return { ok: false, reason: "No hay option con " + wanted };
-
-    sel.value = match.value;
-    sel.dispatchEvent(new Event("input", { bubbles: true }));
-    sel.dispatchEvent(new Event("change", { bubbles: true }));
-    return { ok: true, value: match.value, text: match.textContent };
-  }, wanted);
-
-  if (!res.ok) throw new Error("No se pudo seleccionar Tipo Usuario: " + (res.reason || "sin detalle"));
-  console.log(`✅ Tipo de usuario seleccionado: ${res.text} (value=${res.value})`);
+async function isBootstrapModalOpen(page, modalSelector) {
+  return await page.evaluate((modalSelector) => {
+    const m = document.querySelector(modalSelector);
+    if (!m) return false;
+    const isShown = m.classList.contains("show");
+    const style = (m.getAttribute("style") || "").toLowerCase();
+    const isDisplayed = style.includes("display: block");
+    return isShown || isDisplayed;
+  }, modalSelector);
 }
 
-// Seleccionar SUCURSAL: input dentro del input-group cuyo span diga "Sucursal"
-async function setSucursalFromEnv(page, { timeout = 30000 } = {}) {
-  const SUC = (process.env.NEW_USER_SUCURSAL || "").trim();
-  if (!SUC) {
-    console.log("ℹ️ NEW_USER_SUCURSAL vacío -> no se selecciona Sucursal.");
-    return;
-  }
+/* -------------------------------------------------------------------------- */
+/* MODAL "Crear usuario": Tipo usuario + Sucursal                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Busca SELECT por label dentro del modal (no depende de IDs duplicados)
+ * (Esto sirve para "Tipo de usuario", que sí es <select>)
+ */
+async function selectInAdminModalByLabel(page, labelIncludes, wantedTextOrValue, { timeout = 20000 } = {}) {
+  const wantedNorm = norm(wantedTextOrValue);
+  const labelNorm = norm(labelIncludes);
 
   await page.waitForFunction(() => {
     const modal = document.querySelector("#adminUsersModal.modal.show") || document.querySelector(".modal.show");
-    if (!modal) return false;
-    const groups = Array.from(modal.querySelectorAll(".input-group"));
-    const norm2 = (s) =>
-      String(s || "")
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/\s+/g, " ")
-        .trim()
-        .toLowerCase();
-
-    return groups.some((g) => {
-      const lab = g.querySelector(".input-group-prepend .input-group-text");
-      const inp = g.querySelector("input");
-      return lab && inp && norm2(lab.textContent).includes("sucursal");
-    });
+    return !!modal;
   }, { timeout });
 
-  // Set nativo
-  const result = await page.evaluate((SUC) => {
-    const modal = document.querySelector("#adminUsersModal.modal.show") || document.querySelector(".modal.show") || document;
-    const norm2 = (s) =>
-      String(s || "")
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/\s+/g, " ")
-        .trim()
-        .toLowerCase();
+  const res = await page.evaluate(
+    ({ labelNorm, wantedNorm, wantedRaw }) => {
+      const modal = document.querySelector("#adminUsersModal.modal.show") || document.querySelector(".modal.show");
+      if (!modal) return { ok: false, reason: "No hay modal visible" };
 
-    const groups = Array.from(modal.querySelectorAll(".input-group"));
-    const g = groups.find((x) => {
-      const lab = x.querySelector(".input-group-prepend .input-group-text");
-      const inp = x.querySelector("input");
-      return lab && inp && norm2(lab.textContent).includes("sucursal");
-    });
+      const norm2 = (s) =>
+        String(s || "")
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .toLowerCase();
 
-    if (!g) return { ok: false, reason: "No se encontró input-group de Sucursal" };
+      const groups = Array.from(modal.querySelectorAll(".form-group, .input-group, .mb-2, .mb-3"));
+      const g = groups.find((x) => {
+        const lab = x.querySelector("label, .input-group-prepend .input-group-text");
+        const sel = x.querySelector("select");
+        return lab && sel && norm2(lab.textContent).includes(labelNorm);
+      });
 
-    const inp = g.querySelector("input");
-    if (!inp) return { ok: false, reason: "No hay input de Sucursal" };
+      if (!g) return { ok: false, reason: `No se encontró grupo con label ~ "${labelNorm}"` };
 
-    const proto = HTMLInputElement.prototype;
-    const desc = Object.getOwnPropertyDescriptor(proto, "value");
-    const setter = desc && desc.set;
+      const sel = g.querySelector("select");
+      if (!sel) return { ok: false, reason: "No hay select en el grupo" };
 
-    inp.focus();
-    if (setter) setter.call(inp, SUC);
-    else inp.value = SUC;
+      const opts = Array.from(sel.querySelectorAll("option"));
 
-    inp.dispatchEvent(new Event("input", { bubbles: true }));
-    inp.dispatchEvent(new Event("change", { bubbles: true }));
+      // 1) si el valor parece numérico o coincide con value exacto => usar value
+      const wantedLooksValue =
+        /^[0-9]+$/.test(String(wantedRaw).trim()) ||
+        opts.some((o) => String(o.value) === String(wantedRaw).trim());
 
-    return { ok: true };
-  }, SUC);
+      let match = null;
 
-  if (!result.ok) throw new Error("No se pudo setear Sucursal: " + (result.reason || "sin detalle"));
+      if (wantedLooksValue) {
+        match = opts.find((o) => String(o.value) === String(wantedRaw).trim());
+      }
 
-  // Fallback de selección: si aparece dropdown de sugerencias, ArrowDown + Enter suele escoger
-  await sleep(350);
-  try {
-    await page.keyboard.press("ArrowDown");
-    await sleep(150);
-    await page.keyboard.press("Enter");
-  } catch {}
+      // 2) si no, buscar por texto
+      if (!match) {
+        match = opts.find((o) => norm2(o.textContent).includes(wantedNorm));
+      }
 
-  console.log(`✅ Sucursal ingresada/seleccionada: ${SUC}`);
+      if (!match) {
+        return {
+          ok: false,
+          reason: `No hay option que matchee value="${wantedRaw}" ni texto~"${wantedNorm}"`,
+          available: opts.map((o) => ({ value: o.value, text: (o.textContent || "").trim() })).slice(0, 15),
+        };
+      }
+
+      sel.focus();
+      sel.value = match.value;
+      sel.dispatchEvent(new Event("input", { bubbles: true }));
+      sel.dispatchEvent(new Event("change", { bubbles: true }));
+      sel.dispatchEvent(new Event("blur", { bubbles: true }));
+
+      return { ok: true, value: match.value, text: (match.textContent || "").trim() };
+    },
+    { labelNorm, wantedNorm, wantedRaw: wantedTextOrValue }
+  );
+
+  if (!res.ok) {
+    console.log("⚠️ selectInAdminModalByLabel debug:", res.available ? res.available : "");
+    throw new Error(res.reason || "No se pudo seleccionar en select");
+  }
+
+  return res;
 }
 
 /**
- * ✅ Llenar inputs del modal "Crear usuario" desde .env:
- *  - Código, Nombre, Correo
- *  - Tipo usuario (BRANCH)
- *  - Sucursal (env)
- *  - Contraseña: TODAS las entradas cuyo label contenga "contraseña" (aunque no sean type=password)
+ * ✅ NUEVO: Sucursal es AUTOCOMPLETE (input), NO select en el modal.
+ * Escribe el texto y selecciona del dropdown si aparece (si no, Enter).
  */
+async function setAutocompleteInAdminModalByLabel(page, labelIncludes, wantedText, { timeout = 25000 } = {}) {
+  const labelNorm = norm(labelIncludes);
+  const wantedRaw = String(wantedText || "").trim();
+  if (!wantedRaw) return;
+
+  // Espera modal visible
+  await page.waitForFunction(() => {
+    const modal = document.querySelector("#adminUsersModal.modal.show") || document.querySelector(".modal.show");
+    return !!modal;
+  }, { timeout });
+
+  // Marca el input del grupo "Sucursal" dentro del modal
+  const found = await page.evaluate(({ labelNorm }) => {
+    const modal = document.querySelector("#adminUsersModal.modal.show") || document.querySelector(".modal.show");
+    if (!modal) return { ok: false, reason: "No hay modal visible" };
+
+    const norm2 = (s) =>
+      String(s || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+
+    const groups = Array.from(modal.querySelectorAll(".input-group, .form-group, .mb-2, .mb-3"));
+    const g = groups.find((x) => {
+      const lab = x.querySelector("label, .input-group-prepend .input-group-text, .input-group-text");
+      const inp = x.querySelector('input[type="text"]');
+      return lab && inp && norm2(lab.textContent).includes(labelNorm);
+    });
+
+    if (!g) return { ok: false, reason: `No se encontró grupo con label ~ "${labelNorm}"` };
+
+    const inp = g.querySelector('input[type="text"]');
+    if (!inp) return { ok: false, reason: "No hay input[type=text] en el grupo" };
+
+    inp.setAttribute("data-autofill", "target");
+    return { ok: true, placeholder: inp.getAttribute("placeholder") || "" };
+  }, { labelNorm });
+
+  if (!found.ok) throw new Error(found.reason);
+
+  const inputSel = '#adminUsersModal [data-autofill="target"], .modal.show [data-autofill="target"]';
+
+  await page.waitForSelector(inputSel, { timeout: 15000 });
+
+  // Tipea como usuario para disparar el autocomplete
+  await page.click(inputSel, { clickCount: 3 });
+  await page.keyboard.press("Backspace");
+  await page.type(inputSel, wantedRaw, { delay: 35 });
+  await sleep(350);
+
+  // Intenta clickear opción visible del autocomplete
+  const picked = await page.evaluate((wantedNorm) => {
+    const norm2 = (s) =>
+      String(s || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+
+    const isVisible = (el) => {
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+
+    const candidates = Array.from(
+      document.querySelectorAll(`
+        .dropdown-menu.show * ,
+        ul[role="listbox"] li,
+        [role="option"],
+        .ng-dropdown-panel .ng-option,
+        .mat-autocomplete-panel mat-option,
+        .autocomplete-items * ,
+        .typeahead * 
+      `)
+    );
+
+    const item = candidates.find((el) => isVisible(el) && norm2(el.textContent).includes(wantedNorm));
+    if (item) {
+      item.scrollIntoView({ block: "center" });
+      item.click();
+      return { ok: true, text: (item.textContent || "").trim() };
+    }
+
+    const visible = candidates
+      .filter(isVisible)
+      .map((el) => (el.textContent || "").trim())
+      .filter(Boolean)
+      .slice(0, 12);
+
+    return { ok: false, visible };
+  }, norm(wantedRaw));
+
+  if (!picked.ok) {
+    console.log("⚠️ No vi dropdown del autocomplete. Intento Enter. Opciones visibles:", picked.visible || []);
+    await page.keyboard.press("Enter");
+  }
+
+  // Sale del input para que el UI aplique dependencias
+  await page.keyboard.press("Tab");
+  await sleep(150);
+
+  // Limpia el marcador
+  await page.evaluate(() => {
+    const el = document.querySelector('[data-autofill="target"]');
+    if (el) el.removeAttribute("data-autofill");
+  });
+}
+
+// Tipo usuario (por label) => SELECT
+async function selectTipoUsuario(page) {
+  const wanted = (process.env.NEW_USER_TIPO || "BRANCH").trim();
+  const r = await selectInAdminModalByLabel(page, "tipo de usuario", wanted, { timeout: 25000 });
+  console.log(`✅ Tipo de usuario: ${r.text} (value=${r.value})`);
+}
+
+// ✅ Sucursal (AUTOCOMPLETE INPUT) => prioriza texto
+async function selectSucursal(page) {
+  const textEnv = (process.env.NEW_USER_SUCURSAL || "").trim();        // ej: "ZONAL BOLOGNESI"
+  const valueEnv = (process.env.NEW_USER_SUCURSAL_VALUE || "").trim(); // ej: "6" (fallback)
+
+  const wanted = textEnv || valueEnv;
+  if (!wanted) {
+    console.log("ℹ️ NEW_USER_SUCURSAL vacío -> no selecciona Sucursal.");
+    return;
+  }
+
+  await setAutocompleteInAdminModalByLabel(page, "sucursal", wanted, { timeout: 25000 });
+  console.log(`✅ Sucursal seteada (autocomplete): ${wanted}`);
+}
+
+// Forzar valor estable para código (por si el UI lo pisa)
+async function forceStableValueInModal(page, selector, value, { tries = 6, waitMs = 220 } = {}) {
+  for (let i = 1; i <= tries; i++) {
+    await page.evaluate(({ selector, value }) => {
+      const modal = document.querySelector("#adminUsersModal.modal.show") || document.querySelector(".modal.show");
+      if (!modal) throw new Error("No hay modal visible");
+
+      const el = modal.querySelector(selector);
+      if (!el) throw new Error("No existe selector en modal: " + selector);
+
+      const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const desc = Object.getOwnPropertyDescriptor(proto, "value");
+      const setter = desc && desc.set;
+
+      el.focus();
+      if (setter) setter.call(el, String(value));
+      else el.value = String(value);
+
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      el.dispatchEvent(new Event("blur", { bubbles: true }));
+    }, { selector, value });
+
+    await sleep(waitMs);
+
+    const now = await page.evaluate((selector) => {
+      const modal = document.querySelector("#adminUsersModal.modal.show") || document.querySelector(".modal.show");
+      const el = modal ? modal.querySelector(selector) : null;
+      return el ? (el.value || "") : null;
+    }, selector);
+
+    if (String(now) === String(value)) {
+      console.log(`✅ Valor estable en ${selector}: ${now}`);
+      return;
+    }
+
+    console.log(`⚠️ Intento ${i}/${tries}: ${selector} no quedó. Actual="${now}" Deseado="${value}"`);
+    await sleep(150);
+  }
+
+  throw new Error(`No se pudo fijar valor estable en ${selector} = "${value}"`);
+}
+
 async function fillCreateUserFromEnv(page) {
   const CODE = (process.env.NEW_USER_CODE || "").trim();
   const NAME = (process.env.NEW_USER_NAME || "").trim();
   const EMAIL = (process.env.NEW_USER_EMAIL || "").trim();
   const PASS = (process.env.NEW_USER_PASS || "").trim();
 
-  // Asegurar que el modal esté presente
   await page.waitForFunction(() => {
     const m = document.querySelector("#adminUsersModal.modal.show") || document.querySelector(".modal.show");
     return !!m;
   }, { timeout: 30000 });
 
-  // ✅ Código / Nombre / Correo (IDs de tu HTML)
-  // Primero: setter nativo. Si aun así te lo corta, intentamos type lento.
-  if (CODE) {
-    await setInputValueNative(page, "#User_USER_CODE", CODE);
-    await sleep(150);
-    // fallback de teclado
-    await typeSlow(page, "#User_USER_CODE", CODE, { delay: 60 });
-    await sleep(150);
-  }
+  // 1) Tipo usuario (SELECT)
+  await selectTipoUsuario(page);
 
-  if (NAME) {
-    await setInputValueNative(page, "#User_U_NAME", NAME);
-    await sleep(120);
-  }
+  // 2) Sucursal (AUTOCOMPLETE INPUT)
+  await selectSucursal(page);
 
-  if (EMAIL) {
-    await setInputValueNative(page, "#User_E_Mail", EMAIL);
-    await sleep(120);
-  }
+  // pequeña pausa para que el UI aplique dependencias
+  await sleep(350);
 
-  // ✅ Tipo usuario BRANCH
-  await selectTipoUsuarioBranch(page);
+  // 3) Nombre / Correo
+  if (NAME) await setInputValueNative(page, "#User_U_NAME", NAME);
+  if (EMAIL) await setInputValueNative(page, "#User_E_Mail", EMAIL);
 
-  // ✅ Sucursal
-  await setSucursalFromEnv(page);
+  // 4) Código (forzado)
+  if (CODE) await forceStableValueInModal(page, "#User_USER_CODE", CODE);
 
-  // ✅ Contraseñas: inputs en grupos cuyo label contenga "contraseña"
+  // 5) Contraseñas por label "contraseña" dentro del modal
   if (PASS) {
     const done = await page.evaluate((PASS) => {
       const modal = document.querySelector("#adminUsersModal.modal.show") || document.querySelector(".modal.show") || document;
@@ -354,9 +498,9 @@ async function fillCreateUserFromEnv(page) {
           .trim()
           .toLowerCase();
 
-      const groups = Array.from(modal.querySelectorAll(".input-group"));
+      const groups = Array.from(modal.querySelectorAll(".input-group, .form-group"));
       const passGroups = groups.filter((g) => {
-        const lab = g.querySelector(".input-group-prepend .input-group-text");
+        const lab = g.querySelector("label, .input-group-prepend .input-group-text");
         const inp = g.querySelector("input");
         return lab && inp && norm2(lab.textContent).includes("contrasena");
       });
@@ -385,20 +529,22 @@ async function fillCreateUserFromEnv(page) {
     console.log("ℹ️ NEW_USER_PASS vacío -> no se setea contraseña.");
   }
 
-  console.log("✅ Modal Crear usuario llenado desde .env (con setters nativos).");
+  console.log("✅ Modal Crear usuario llenado (Tipo por SELECT + Sucursal por AUTOCOMPLETE + Código estable).");
 }
 
 /* -------------------------------------------------------------------------- */
-/* ✅ Botones GUARDAR por container                                            */
+/* FIX: CLICK GUARDAR MÁS RÁPIDO                                               */
 /* -------------------------------------------------------------------------- */
 
-async function clickButtonInContainerByText(page, containerSelector, textWanted, { timeout = 30000 } = {}) {
+// Click rápido: intenta inmediato y si no está, espera poco y reintenta
+async function clickButtonInContainerByText(page, containerSelector, textWanted, { timeout = 12000 } = {}) {
   const wanted = norm(textWanted);
+  const started = Date.now();
 
-  await page.waitForFunction(
-    ({ containerSelector, wanted }) => {
+  while (Date.now() - started < timeout) {
+    const res = await page.evaluate(({ containerSelector, wanted }) => {
       const container = document.querySelector(containerSelector);
-      if (!container) return false;
+      if (!container) return { ok: false, reason: "No existe container" };
 
       const norm2 = (s) =>
         String(s || "")
@@ -408,42 +554,40 @@ async function clickButtonInContainerByText(page, containerSelector, textWanted,
           .trim()
           .toLowerCase();
 
-      const btns = Array.from(container.querySelectorAll("button"));
-      return btns.some((b) => norm2(b.textContent).includes(wanted));
-    },
-    { timeout },
-    { containerSelector, wanted }
-  );
+      const btn = Array.from(container.querySelectorAll("button")).find((b) => norm2(b.textContent).includes(wanted));
+      if (!btn) return { ok: false, reason: "No existe botón aún" };
 
-  const res = await page.evaluate(({ containerSelector, wanted }) => {
-    const container = document.querySelector(containerSelector);
-    if (!container) return { ok: false, reason: "No existe container" };
+      btn.scrollIntoView({ block: "center", inline: "center" });
 
-    const norm2 = (s) =>
-      String(s || "")
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/\s+/g, " ")
-        .trim()
-        .toLowerCase();
+      // click agresivo (rápido)
+      btn.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      btn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      btn.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
-    const btn = Array.from(container.querySelectorAll("button")).find((b) => norm2(b.textContent).includes(wanted));
-    if (!btn) return { ok: false, reason: "No existe botón" };
+      return { ok: true };
+    }, { containerSelector, wanted });
 
-    btn.scrollIntoView({ block: "center", inline: "center" });
-    btn.click();
-    return { ok: true };
-  }, { containerSelector, wanted });
+    if (res.ok) return;
 
-  if (!res.ok) throw new Error(`No se pudo click ${textWanted}: ${res.reason || "sin detalle"}`);
+    await sleep(200);
+  }
+
+  throw new Error(`No se pudo click ${textWanted} dentro de ${containerSelector} (timeout corto).`);
 }
 
 /* -------------------------------------------------------------------------- */
-/* ✅ MÓDULOS (modal #modulesModal)                                            */
+/* MÓDULOS (modal #modulesModal)                                               */
 /* -------------------------------------------------------------------------- */
 
-// ✅ Click específico del botón (icono fa-list) del bloque cuyo label sea “Módulos”
-async function clickModulosButton(page, { timeout = 60000 } = {}) {
+// Click del botón (fa-list) "Módulos" SOLO SI NO ESTÁ ABIERTO
+async function clickModulosButton(page, { timeout = 20000 } = {}) {
+  // ✅ si ya está abierto, NO volver a abrir
+  if (await isBootstrapModalOpen(page, "#modulesModal")) {
+    console.log("ℹ️ modulesModal ya está abierto -> no se vuelve a abrir.");
+    return;
+  }
+
   await page.waitForFunction(
     () => {
       const normalize = (s) =>
@@ -458,10 +602,10 @@ async function clickModulosButton(page, { timeout = 60000 } = {}) {
       const scope = roots.length ? roots : [document];
 
       for (const root of scope) {
-        const groups = Array.from(root.querySelectorAll(".input-group.mb-3"));
+        const groups = Array.from(root.querySelectorAll(".input-group.mb-3, .input-group"));
         for (const g of groups) {
           const label = g.querySelector(".input-group-prepend .input-group-text");
-          const btn = g.querySelector('button[type="button"].input-group-text');
+          const btn = g.querySelector('button[type="button"].input-group-text, button[type="button"]');
           const ico = btn ? btn.querySelector("i.fa.fa-list") : null;
           if (!label || !btn || !ico) continue;
           if (normalize(label.textContent).includes("modulos")) return true;
@@ -485,10 +629,10 @@ async function clickModulosButton(page, { timeout = 60000 } = {}) {
     const scope = roots.length ? roots : [document];
 
     for (const root of scope) {
-      const groups = Array.from(root.querySelectorAll(".input-group.mb-3"));
+      const groups = Array.from(root.querySelectorAll(".input-group.mb-3, .input-group"));
       for (const g of groups) {
         const label = g.querySelector(".input-group-prepend .input-group-text");
-        const btn = g.querySelector('button[type="button"].input-group-text');
+        const btn = g.querySelector('button[type="button"].input-group-text, button[type="button"]');
         const ico = btn ? btn.querySelector("i.fa.fa-list") : null;
         if (!label || !btn || !ico) continue;
 
@@ -516,45 +660,42 @@ async function clickModulosButton(page, { timeout = 60000 } = {}) {
 
   if (!result.ok) throw new Error("No se pudo clickear Módulos: " + (result.reason || "sin detalle"));
 
+  // esperar que aparezca
   await page.waitForFunction(() => {
     const m = document.querySelector("#modulesModal");
     if (!m) return false;
     const isShown = m.classList.contains("show");
-    const isDisplayed = (m.getAttribute("style") || "").includes("display: block");
+    const style = (m.getAttribute("style") || "").toLowerCase();
+    const isDisplayed = style.includes("display: block");
     return isShown || isDisplayed;
-  }, { timeout });
+  }, { timeout: 20000 });
 
+  // esperar filas
   await page.waitForFunction(() => {
     const modal = document.querySelector("#modulesModal");
     if (!modal) return false;
     const rows = modal.querySelectorAll("tbody tr");
     return rows && rows.length > 0;
-  }, { timeout: 30000 });
+  }, { timeout: 20000 });
 }
 
-// Scroll dentro del contenedor de la tabla (por si hay overflow)
-async function scrollModulesTableToBottom(page, { maxLoops = 40 } = {}) {
+async function scrollModulesTableToBottom(page, { maxLoops = 30 } = {}) {
   for (let i = 0; i < maxLoops; i++) {
     const didMove = await page.evaluate(() => {
       const modal = document.querySelector("#modulesModal");
       if (!modal) return false;
 
-      const scroller =
-        modal.querySelector(".table-scroll") ||
-        modal.querySelector(".modal-body") ||
-        modal;
-
+      const scroller = modal.querySelector(".table-scroll") || modal.querySelector(".modal-body") || modal;
       const prev = scroller.scrollTop;
       scroller.scrollTop = scroller.scrollHeight;
       return scroller.scrollTop !== prev;
     });
 
-    await sleep(200);
+    await sleep(150);
     if (!didMove) break;
   }
 }
 
-// Lee módulos: título + checked de Activo/Escritura
 async function extractModules(page) {
   return await page.evaluate(() => {
     const modal = document.querySelector("#modulesModal");
@@ -569,20 +710,17 @@ async function extractModules(page) {
       if (!tds.length) continue;
 
       const title = clean(tds[0]?.innerText || tds[0]?.textContent);
-
       const cbs = Array.from(r.querySelectorAll('input[type="checkbox"]'));
       const activo = cbs[0] ? !!cbs[0].checked : null;
       const escritura = cbs[1] ? !!cbs[1].checked : null;
 
       if (!title || title.toLowerCase() === "título" || title.toLowerCase() === "titulo") continue;
-
       out.push({ title, activo, escritura });
     }
     return out;
   });
 }
 
-// ✅ Convierte a formato “objeto por título”
 function normalizeTemplateToObject(templateAny) {
   if (templateAny && typeof templateAny === "object" && !Array.isArray(templateAny)) {
     const out = {};
@@ -614,9 +752,8 @@ function normalizeTemplateToObject(templateAny) {
   return {};
 }
 
-// Aplica plantilla (marcar/desmarcar) por título
 async function applyModulesTemplate(page, templateObj) {
-  const result = await page.evaluate((templateObj) => {
+  return await page.evaluate((templateObj) => {
     const normalize = (s) =>
       String(s || "")
         .normalize("NFD")
@@ -661,54 +798,53 @@ async function applyModulesTemplate(page, templateObj) {
       }
 
       const cbs = Array.from(row.querySelectorAll('input[type="checkbox"]'));
-      const activoWanted = conf ? conf.activo : undefined;
-      const escrituraWanted = conf ? conf.escritura : undefined;
-
-      setCheckbox(cbs[0], activoWanted);
-      setCheckbox(cbs[1], escrituraWanted);
+      setCheckbox(cbs[0], conf?.activo);
+      setCheckbox(cbs[1], conf?.escritura);
       logs.touched++;
     }
 
     return logs;
   }, templateObj);
-
-  return result;
 }
 
-async function clickGuardarModulesModal(page, { timeout = 30000 } = {}) {
-  await page.waitForFunction(() => {
-    const modal = document.querySelector("#modulesModal");
-    if (!modal) return false;
-    const btns = Array.from(modal.querySelectorAll("button"));
-    return btns.some((b) => (b.textContent || "").trim().toLowerCase() === "guardar");
-  }, { timeout });
+// ✅ CLICK GUARDAR MÓDULOS MÁS RÁPIDO (no espera cierre)
+async function clickGuardarModulesModal(page, { timeout = 12000 } = {}) {
+  const started = Date.now();
 
-  await page.evaluate(() => {
-    const modal = document.querySelector("#modulesModal");
-    const btn = Array.from(modal.querySelectorAll("button")).find(
-      (b) => (b.textContent || "").trim().toLowerCase() === "guardar"
-    );
-    if (!btn) throw new Error("No se encontró el botón Guardar en módulos");
-    btn.scrollIntoView({ block: "center", inline: "center" });
-    btn.click();
-  });
+  while (Date.now() - started < timeout) {
+    const res = await page.evaluate(() => {
+      const modal = document.querySelector("#modulesModal");
+      if (!modal) return { ok: false, reason: "No existe #modulesModal" };
 
-  try {
-    await page.waitForFunction(() => {
-      const m = document.querySelector("#modulesModal");
-      if (!m) return true;
-      const isShown = m.classList.contains("show");
-      const isDisplayed = (m.getAttribute("style") || "").includes("display: block");
-      return !(isShown || isDisplayed);
-    }, { timeout: 15000 });
-  } catch {}
+      const btn = Array.from(modal.querySelectorAll("button")).find(
+        (b) => (b.textContent || "").trim().toLowerCase() === "guardar"
+      );
+      if (!btn) return { ok: false, reason: "No hay botón Guardar aún" };
+
+      btn.scrollIntoView({ block: "center", inline: "center" });
+      btn.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      btn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      btn.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      return { ok: true };
+    });
+
+    if (res.ok) {
+      await sleep(Number(process.env.SAVE_WAIT_MS || 600)); // ✅ más rápido
+      return;
+    }
+
+    await sleep(200);
+  }
+
+  throw new Error("No se pudo clickear Guardar en modulesModal (timeout corto).");
 }
 
 /* -------------------------------------------------------------------------- */
-/* ✅ TABS                                                                      */
+/* TABS                                                                         */
 /* -------------------------------------------------------------------------- */
 
-async function activateTabByText(page, tabText, { timeout = 30000 } = {}) {
+async function activateTabByText(page, tabText, { timeout = 15000 } = {}) {
   const wanted = norm(tabText);
 
   await page.waitForFunction(
@@ -745,24 +881,21 @@ async function activateTabByText(page, tabText, { timeout = 30000 } = {}) {
     a.click();
   }, wanted);
 
-  await sleep(600);
+  await sleep(350);
 }
 
 /* -------------------------------------------------------------------------- */
-/* ✅ CAMPOS SAP + ARTÍCULOS (GENÉRICO: 2 tablas / 2 columnas)                 */
+/* CAMPOS SAP + ARTÍCULOS (GENÉRICO)                                           */
 /* -------------------------------------------------------------------------- */
 
-// Extraer catálogo (GENÉRICO) por container selector
 async function extractCamposSAPGeneric(page, containerSelector) {
   return await page.evaluate((containerSelector) => {
     const container = document.querySelector(containerSelector);
     if (!container) throw new Error(`No existe ${containerSelector}`);
 
     const clean = (s) => String(s || "").replace(/\s+/g, " ").trim();
-
     const out = [];
 
-    // hay 2 tablas (2 columnas). Tomamos TODAS.
     const tables = Array.from(container.querySelectorAll("table"));
     if (!tables.length) throw new Error(`No hay tablas dentro de ${containerSelector}`);
 
@@ -779,7 +912,6 @@ async function extractCamposSAPGeneric(page, containerSelector) {
 
         const cbs = Array.from(r.querySelectorAll('input[type="checkbox"]'));
 
-        // Header de sección (colspan=3)
         if (!cbs.length && tds.length === 1 && (tds[0].getAttribute("colspan") || "") === "3") {
           const header = clean(tds[0].innerText || tds[0].textContent);
           if (header) group = header;
@@ -817,17 +949,14 @@ async function extractCamposSAPGeneric(page, containerSelector) {
   }, containerSelector);
 }
 
-// Normaliza template Campos SAP => objeto por CODE
 function normalizeCamposTemplateToObject(templateAny) {
   const pickBool = (v) => (typeof v === "boolean" ? v : undefined);
 
-  // objeto { "BPG0": {...}, ... }
   if (templateAny && typeof templateAny === "object" && !Array.isArray(templateAny)) {
     const out = {};
     for (const [k, v] of Object.entries(templateAny)) {
       if (!v || typeof v !== "object") continue;
       out[k] = {
-        // admite {mostrar, editar} y también estructuras con nombre/grupo/container
         mostrar: pickBool(v.mostrar ?? v.show ?? v.visible ?? v.ver),
         editar: pickBool(v.editar ?? v.edit ?? v.escritura),
       };
@@ -835,7 +964,6 @@ function normalizeCamposTemplateToObject(templateAny) {
     return out;
   }
 
-  // array [{code, mostrar, editar}, ...]
   if (Array.isArray(templateAny)) {
     const out = {};
     for (const it of templateAny) {
@@ -853,7 +981,6 @@ function normalizeCamposTemplateToObject(templateAny) {
   return {};
 }
 
-// Aplica template (GENÉRICO) por container selector
 async function applyCamposTemplateGeneric(page, containerSelector, templateObj) {
   return await page.evaluate((containerSelector, templateObj) => {
     const container = document.querySelector(containerSelector);
@@ -871,12 +998,10 @@ async function applyCamposTemplateGeneric(page, containerSelector, templateObj) 
       cb.dispatchEvent(new Event("input", { bubbles: true }));
     };
 
-    // TOMAMOS todos los checkboxes del container
     const inputs = Array.from(
       container.querySelectorAll('input[type="checkbox"][name^="show_"], input[type="checkbox"][name^="edit_"]')
     );
 
-    // Map CODE => {showCb, editCb}
     const byCode = new Map();
     for (const cb of inputs) {
       const name = cb.getAttribute("name") || "";
@@ -888,7 +1013,6 @@ async function applyCamposTemplateGeneric(page, containerSelector, templateObj) 
       if (!code) continue;
 
       if (!byCode.has(code)) byCode.set(code, { showCb: null, editCb: null });
-
       const row = byCode.get(code);
       if (isShow) row.showCb = cb;
       if (isEdit) row.editCb = cb;
@@ -912,7 +1036,7 @@ async function applyCamposTemplateGeneric(page, containerSelector, templateObj) 
 }
 
 /* -------------------------------------------------------------------------- */
-/* ✅ CREAR (botón final) controlado por .env                                  */
+/* CREAR (botón final)                                                         */
 /* -------------------------------------------------------------------------- */
 
 async function clickCrearUsuarioSiCorresponde(page) {
@@ -922,14 +1046,13 @@ async function clickCrearUsuarioSiCorresponde(page) {
     return;
   }
 
-  // botón "Crear" está dentro del modal adminUsersModal
   await page.waitForFunction(() => {
     const modal = document.querySelector("#adminUsersModal") || document;
     const btn = Array.from(modal.querySelectorAll("button")).find(
       (b) => (b.textContent || "").trim().toLowerCase() === "crear"
     );
     return !!btn;
-  }, { timeout: 30000 });
+  }, { timeout: 20000 });
 
   await page.evaluate(() => {
     const modal = document.querySelector("#adminUsersModal") || document;
@@ -938,44 +1061,44 @@ async function clickCrearUsuarioSiCorresponde(page) {
     );
     if (!btn) throw new Error("No se encontró botón Crear");
     btn.scrollIntoView({ block: "center", inline: "center" });
-    btn.click();
+
+    btn.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    btn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    btn.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   });
 
   console.log("✅ Click en 'Crear' realizado (AUTO_CREATE=true).");
 }
 
 /* -------------------------------------------------------------------------- */
-/* MAIN                                                                         */
+/* MAIN                                                                        */
 /* -------------------------------------------------------------------------- */
 
 (async () => {
   const BASE_URL = process.env.SCRAPE_URL || "https://sap2.llamagas.nubeprivada.biz/";
   const USER = process.env.LOGIN_USER;
   const PASS = process.env.LOGIN_PASS;
+
   const HEADLESS = String(process.env.HEADLESS || "true").toLowerCase() === "true";
   const KEEP_OPEN = String(process.env.KEEP_OPEN || "false").toLowerCase() === "true";
-
   const AUTO_SAVE_CAMPOS = String(process.env.AUTO_SAVE_CAMPOS || "true").toLowerCase() === "true";
 
-  const VIEWPORT_WIDTH = parseInt(process.env.VIEWPORT_WIDTH || "1920", 10);
-  const VIEWPORT_HEIGHT = parseInt(process.env.VIEWPORT_HEIGHT || "1080", 10);
+  const VIEWPORT_WIDTH = parseInt(process.env.VIEWPORT_WIDTH || "1536", 10);
+  const VIEWPORT_HEIGHT = parseInt(process.env.VIEWPORT_HEIGHT || "864", 10);
   const DEVICE_SCALE_FACTOR = parseFloat(process.env.DEVICE_SCALE_FACTOR || "1");
 
-  // ✅ Permisos MÓDULOS
+  // Permisos MÓDULOS
   const PERMISOS_DIR = path.join(process.cwd(), "permisos_modulos");
-  const profile = (process.env.PERMISOS_PROFILE || "").trim();
   const envFile = (process.env.PERMISOS_FILE || "").trim();
-  const permisosFileName = envFile || (profile ? `${profile}.json` : "branch.json");
-  const safeFileName = path.basename(permisosFileName);
-  const permisosPath = path.join(PERMISOS_DIR, safeFileName);
+  const permisosFileName = envFile || "branch.json";
+  const permisosPath = path.join(PERMISOS_DIR, path.basename(permisosFileName));
 
-  // ✅ Permisos CAMPOS SAP + ARTÍCULOS
+  // Permisos CAMPOS
   const CAMPOS_DIR = path.join(process.cwd(), "permisos_campossap");
-  const camposProfile = (process.env.CAMPOS_PROFILE || "").trim();
   const camposEnvFile = (process.env.CAMPOS_FILE || "").trim();
-  const camposFileName = camposEnvFile || (camposProfile ? `${camposProfile}.json` : "branch.json");
-  const safeCamposFileName = path.basename(camposFileName);
-  const camposPath = path.join(CAMPOS_DIR, safeCamposFileName);
+  const camposFileName = camposEnvFile || "branch.json";
+  const camposPath = path.join(CAMPOS_DIR, path.basename(camposFileName));
 
   if (!USER || !PASS) throw new Error("Faltan LOGIN_USER o LOGIN_PASS en tu .env");
 
@@ -984,9 +1107,7 @@ async function clickCrearUsuarioSiCorresponde(page) {
   await fs.ensureDir(PERMISOS_DIR);
   await fs.ensureDir(CAMPOS_DIR);
 
-  console.log("📄 Perfil módulos:", safeFileName);
   console.log("📁 Ruta módulos :", permisosPath);
-  console.log("📄 Perfil campos :", safeCamposFileName);
   console.log("📁 Ruta campos  :", camposPath);
 
   const browser = await puppeteer.launch({
@@ -1027,7 +1148,7 @@ async function clickCrearUsuarioSiCorresponde(page) {
   await typeSlow(page, 'input[type="password"]', PASS, { delay: 20 });
 
   await page.click('button[type="submit"]');
-  await sleep(1200);
+  await sleep(900);
 
   // Detectar 2FA
   let needs2FA = false;
@@ -1047,7 +1168,7 @@ async function clickCrearUsuarioSiCorresponde(page) {
     await page.waitForSelector(otpSel, { timeout: 30000 });
     await typeSlow(page, otpSel, code, { delay: 40 });
     await page.keyboard.press("Enter");
-    await sleep(1500);
+    await sleep(1100);
   }
 
   // Ir a Admin. de usuarios
@@ -1060,34 +1181,34 @@ async function clickCrearUsuarioSiCorresponde(page) {
     { timeout: 60000 }
   );
 
-  await sleep(1200);
+  await sleep(900);
   await snapshot(page, outDir, "adminUsers");
 
   // Crear usuario
   const crearBtnSel = 'button.btn.btn-outline-secondary.btn-timbra-one.mr-sm-3';
   try {
-    await page.waitForSelector(crearBtnSel, { timeout: 20000 });
+    await page.waitForSelector(crearBtnSel, { timeout: 15000 });
     await page.click(crearBtnSel);
   } catch {
-    await clickByText(page, "Crear usuario", { timeout: 60000 });
+    await clickByText(page, "Crear usuario", { timeout: 20000 });
   }
 
-  await sleep(1200);
+  await sleep(900);
   await snapshot(page, outDir, "crearUsuario");
 
-  // ✅ Llenar inputs + Tipo BRANCH + Sucursal + Contraseñas
+  // Llenar inputs + Tipo + Sucursal(AUTOCOMPLETE) + Contraseñas
   await fillCreateUserFromEnv(page);
-  await sleep(600);
+  await sleep(400);
   await snapshot(page, outDir, "crearUsuario_lleno");
 
   // ----------------------
-  // ✅ MÓDULOS
+  // ✅ MÓDULOS (SOLO 1 VEZ)
   // ----------------------
-  await clickModulosButton(page, { timeout: 60000 });
-  await sleep(800);
+  await clickModulosButton(page, { timeout: 25000 });
+  await sleep(500);
 
   await scrollModulesTableToBottom(page);
-  await sleep(300);
+  await sleep(200);
 
   const modules = await extractModules(page);
   await fs.writeJson(path.join(outDir, `modules_catalog_${ts()}.json`), modules, { spaces: 2 });
@@ -1100,8 +1221,7 @@ async function clickCrearUsuarioSiCorresponde(page) {
       templateObj[m.title] = { activo: m.activo === true, escritura: m.escritura === true };
     }
     await fs.writeJson(permisosPath, templateObj, { spaces: 2 });
-    console.log("✅ Se creó plantilla de MÓDULOS:");
-    console.log("   ", permisosPath);
+    console.log("✅ Se creó plantilla de MÓDULOS:", permisosPath);
     await snapshot(page, outDir, "modulos_template_creado");
   } else {
     const rawTemplate = await fs.readJson(permisosPath);
@@ -1114,27 +1234,24 @@ async function clickCrearUsuarioSiCorresponde(page) {
       logs.notFound.forEach((t) => console.log("   -", t));
     }
 
-    await sleep(500);
+    await sleep(250);
     await snapshot(page, outDir, "modulos_aplicado");
 
-    await clickGuardarModulesModal(page);
-    await sleep(1200);
+    await clickGuardarModulesModal(page); // ✅ más rápido
     await snapshot(page, outDir, "modulos_guardado");
   }
 
   // ----------------------
-  // ✅ CAMPOS SAP + DATOS ARTÍCULOS + GUARDAR BOTONES
+  // ✅ CAMPOS SAP + DATOS ARTÍCULOS + GUARDAR (MÁS RÁPIDO)
   // ----------------------
   try {
     // SOCIOS DE NEGOCIOS
     const bpCatalog = await extractCamposSAPGeneric(page, "#ModulosSociosDeNegocios");
 
-    // ARTÍCULOS: activar tab
+    // ARTÍCULOS
     try {
       await activateTabByText(page, "Datos de artículos");
-    } catch (e) {
-      console.log("ℹ️ Tab 'Datos de artículos' no se pudo activar (quizá ya estaba):", e.message || e);
-    }
+    } catch {}
     const artCatalog = await extractCamposSAPGeneric(page, "#ModulosArticulos");
 
     const camposCatalog = [...bpCatalog, ...artCatalog];
@@ -1143,59 +1260,58 @@ async function clickCrearUsuarioSiCorresponde(page) {
     await fs.writeJson(path.join(outDir, `campos_sap_catalog_latest.json`), camposCatalog, { spaces: 2 });
     console.log(`🧾 Campos SAP + Artículos detectados: ${camposCatalog.length}`);
 
-    // Si no existe template, lo creamos (con NOMBRE para guiarte)
     if (!(await fs.pathExists(camposPath))) {
       const templateObj = {};
       for (const c of camposCatalog) {
         if (!c.code) continue;
         templateObj[c.code] = {
-          nombre: c.label,      // 👈 para guiarte
-          grupo: c.group,       // 👈 para guiarte
-          container: c.container, // 👈 para guiarte
+          nombre: c.label,
+          grupo: c.group,
+          container: c.container,
           mostrar: c.mostrar === true,
           editar: c.editar === true,
         };
       }
       await fs.writeJson(camposPath, templateObj, { spaces: 2 });
-      console.log("✅ Se creó plantilla de CAMPOS (Socios + Artículos) con NOMBRE:");
-      console.log("   ", camposPath);
+      console.log("✅ Se creó plantilla de CAMPOS:", camposPath);
       await snapshot(page, outDir, "campos_template_creado");
     } else {
       const rawCampos = await fs.readJson(camposPath);
       const templateObj = normalizeCamposTemplateToObject(rawCampos);
 
-      // APLICAR en SOCIOS
-      // (si estás en tab Artículos, volver a Socios no es necesario para aplicar si el DOM está; pero para guardar sí)
+      // aplicar socios
       const logsBP = await applyCamposTemplateGeneric(page, "#ModulosSociosDeNegocios", templateObj);
       console.log(`🧩 CAMPOS SOCIOS aplicados. Filas tocadas: ${logsBP.touched}`);
 
-      // APLICAR en ARTÍCULOS
+      // aplicar artículos
       try {
         await activateTabByText(page, "Datos de artículos");
       } catch {}
       const logsART = await applyCamposTemplateGeneric(page, "#ModulosArticulos", templateObj);
       console.log(`🧩 DATOS ARTÍCULOS aplicados. Filas tocadas: ${logsART.touched}`);
 
-      await sleep(500);
+      await sleep(250);
       await snapshot(page, outDir, "campos_aplicado_todos");
 
       if (AUTO_SAVE_CAMPOS) {
         // Guardar Socios
-        // (asegurar tab / sección visible para evitar que el botón no esté accesible)
         try {
-          await activateTabByText(page, "Campos SAP"); // si existe un tab con ese nombre en tu UI
+          await activateTabByText(page, "Campos SAP");
         } catch {}
-        // igual el botón está dentro del container:
-        await clickButtonInContainerByText(page, "#ModulosSociosDeNegocios", "GUARDAR CAMPOS S. DE NEGOCIOS");
-        await sleep(1500);
+        await clickButtonInContainerByText(page, "#ModulosSociosDeNegocios", "GUARDAR CAMPOS S. DE NEGOCIOS", {
+          timeout: 12000,
+        });
+        await sleep(Number(process.env.SAVE_WAIT_MS || 600));
         await snapshot(page, outDir, "guardar_campos_socios");
 
         // Guardar Artículos
         try {
           await activateTabByText(page, "Datos de artículos");
         } catch {}
-        await clickButtonInContainerByText(page, "#ModulosArticulos", "GUARDAR DATOS DE ARTÍCULOS");
-        await sleep(1500);
+        await clickButtonInContainerByText(page, "#ModulosArticulos", "GUARDAR DATOS DE ARTÍCULOS", {
+          timeout: 12000,
+        });
+        await sleep(Number(process.env.SAVE_WAIT_MS || 600));
         await snapshot(page, outDir, "guardar_datos_articulos");
       } else {
         console.log("ℹ️ AUTO_SAVE_CAMPOS=false -> NO se hace click en botones GUARDAR de Campos.");
@@ -1209,7 +1325,7 @@ async function clickCrearUsuarioSiCorresponde(page) {
   // ✅ CREAR (según .env)
   // ----------------------
   await clickCrearUsuarioSiCorresponde(page);
-  await sleep(1200);
+  await sleep(800);
   await snapshot(page, outDir, "post_crear_si_corresponde");
 
   console.log("Listo ✅");
