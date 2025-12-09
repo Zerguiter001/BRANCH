@@ -8,6 +8,13 @@
 //   2) Fallback: teclado determinístico (ArrowDown hasta índice exacto) + Enter (SIN TAB)
 //   3) Fallback: click por coordenadas (page.mouse) al centro del item
 // - Validación: ng-invalid / aria-invalid / feedback "escoge ... sucursal"
+//
+// ✅ NUEVO (ARREGLADO): Counter rol (solo cuando el tipo = COUNTER o ADMINISTRADOR)
+// - Lee NEW_USER_COUNTER_ROL (puede ser TEXTO visible p.ej. "CAJA" o VALUE interno p.ej. "cashRegister")
+// - YA NO usa un ID fijo (porque te estaba agarrando el SELECT equivocado).
+// - Detecta el SELECT correcto por el LABEL (contiene "rol"/"caja"/"counter") y EXCLUYE "Tipo de usuario".
+// - Si el tipo es COUNTER/ADMIN y NO aparece el select => ERROR (para que no se “pase”)
+// - Si el tipo NO es COUNTER/ADMIN y no aparece => lo ignora
 // --------------------------------------------------------------------------------------------
 
 require("dotenv").config();
@@ -289,7 +296,7 @@ async function selectInAdminModalByLabel(page, labelIncludes, wantedTextOrValue,
         return {
           ok: false,
           reason: `No hay option que matchee value="${wantedRaw}" ni texto~"${wantedNorm}"`,
-          available: opts.map((o) => ({ value: o.value, text: (o.textContent || "").trim() })).slice(0, 20),
+          available: opts.map((o) => ({ value: o.value, text: (o.textContent || "").trim() })).slice(0, 50),
         };
       }
 
@@ -310,6 +317,291 @@ async function selectInAdminModalByLabel(page, labelIncludes, wantedTextOrValue,
   }
 
   return res;
+}
+
+/* -------------------------------------------------------------------------- */
+/* ✅ NUEVO (ARREGLADO): COUNTER ROL                                           */
+/* -------------------------------------------------------------------------- */
+
+function isTipoRequiringCounterRol(tipoTextOrEnv) {
+  const t = norm(tipoTextOrEnv || "");
+  return t.includes("counter") || t.includes("admin") || t.includes("administrador");
+}
+
+/**
+ * Busca el SELECT de "Counter rol" por LABEL/estructura (NO por ID fijo).
+ * Excluye el select de "Tipo de usuario".
+ * Luego hace match por VALUE o por TEXTO (y con sinónimos CAJA<->cash/register).
+ */
+async function selectCounterRolIfPresent(page, tipoRes, { timeout = 12000 } = {}) {
+  const wantedRaw = (process.env.NEW_USER_COUNTER_ROL || "").trim();
+  if (!wantedRaw) {
+    console.log("ℹ️ NEW_USER_COUNTER_ROL vacío -> no selecciona Counter rol.");
+    return;
+  }
+
+  // Tipo real (prioriza lo que ya seleccionó el UI)
+  const tipoText = (tipoRes && tipoRes.text) ? tipoRes.text : (process.env.NEW_USER_TIPO || "");
+  const required = isTipoRequiringCounterRol(tipoText);
+
+  await waitAdminUsersModalOpen(page, { timeout: 25000 });
+
+  // Esperar a que el framework pinte el select si es requerido
+  if (required) {
+    try {
+      await page.waitForFunction(() => {
+        const modal = document.querySelector("#adminUsersModal");
+        if (!modal || !modal.classList.contains("show")) return false;
+
+        const norm2 = (s) =>
+          String(s || "")
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .toLowerCase();
+
+        const isVisible = (el) => {
+          if (!el) return false;
+          const r = el.getBoundingClientRect();
+          const st = window.getComputedStyle(el);
+          return r.width > 0 && r.height > 0 && st.display !== "none" && st.visibility !== "hidden";
+        };
+
+        const groups = Array.from(modal.querySelectorAll(".form-group, .input-group, .mb-2, .mb-3"));
+        const candidates = [];
+
+        for (const g of groups) {
+          const labEl = g.querySelector("label, .input-group-prepend .input-group-text, .input-group-text");
+          const sel = g.querySelector("select");
+          if (!labEl || !sel) continue;
+
+          const lab = norm2(labEl.textContent);
+
+          // EXCLUIR "Tipo de usuario"
+          if (lab.includes("tipo") && lab.includes("usuario")) continue;
+
+          const id = norm2(sel.id || "");
+          const name = norm2(sel.getAttribute("name") || "");
+
+          // Heurística para "rol"
+          const looksRol =
+            lab.includes("rol") || lab.includes("caja") || lab.includes("counter") ||
+            id.includes("rol") || id.includes("caja") || id.includes("cash") || id.includes("register") || id.includes("counter") ||
+            name.includes("rol") || name.includes("caja") || name.includes("cash") || name.includes("register") || name.includes("counter");
+
+          if (!looksRol) continue;
+          if (!isVisible(sel)) continue;
+
+          // Penaliza si por opciones parece ser el select de TIPO
+          const optTxt = Array.from(sel.querySelectorAll("option"))
+            .map((o) => norm2(o.textContent))
+            .join(" ");
+          const looksTipo = optTxt.includes("branch") && optTxt.includes("counter") && optTxt.includes("admin");
+          const scoreBase =
+            (lab.includes("rol") ? 5 : 0) +
+            (lab.includes("caja") ? 5 : 0) +
+            (lab.includes("counter") ? 4 : 0) +
+            (id.includes("rol") || name.includes("rol") ? 3 : 0) +
+            (id.includes("cash") || name.includes("cash") || id.includes("register") || name.includes("register") ? 3 : 0) +
+            (looksTipo ? -100 : 0);
+
+          candidates.push({ score: scoreBase, lab: labEl.textContent || "", sel });
+        }
+
+        if (!candidates.length) return false;
+
+        candidates.sort((a, b) => b.score - a.score);
+        const best = candidates[0];
+        return !!best && best.score > 0;
+      }, { timeout });
+    } catch {
+      throw new Error("❌ Se esperaba 'Counter rol' (por ser COUNTER/ADMIN) pero no apareció el SELECT en el modal.");
+    }
+  }
+
+  const res = await page.evaluate(({ wantedRaw }) => {
+    const modal = document.querySelector("#adminUsersModal");
+    if (!modal || !modal.classList.contains("show")) {
+      return { ok: false, missing: true, reason: "No hay #adminUsersModal visible" };
+    }
+
+    const norm2 = (s) =>
+      String(s || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+
+    const isVisible = (el) => {
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      const st = window.getComputedStyle(el);
+      return r.width > 0 && r.height > 0 && st.display !== "none" && st.visibility !== "hidden";
+    };
+
+    // limpiar marcas previas
+    modal.querySelectorAll('[data-autofill="counterrol"]').forEach((x) => x.removeAttribute("data-autofill"));
+
+    const groups = Array.from(modal.querySelectorAll(".form-group, .input-group, .mb-2, .mb-3"));
+    const candidates = [];
+
+    for (const g of groups) {
+      const labEl = g.querySelector("label, .input-group-prepend .input-group-text, .input-group-text");
+      const sel = g.querySelector("select");
+      if (!labEl || !sel) continue;
+
+      const lab = norm2(labEl.textContent);
+
+      // EXCLUIR Tipo usuario
+      if (lab.includes("tipo") && lab.includes("usuario")) continue;
+
+      const id = norm2(sel.id || "");
+      const name = norm2(sel.getAttribute("name") || "");
+      if (!isVisible(sel)) continue;
+
+      const looksRol =
+        lab.includes("rol") || lab.includes("caja") || lab.includes("counter") ||
+        id.includes("rol") || id.includes("caja") || id.includes("cash") || id.includes("register") || id.includes("counter") ||
+        name.includes("rol") || name.includes("caja") || name.includes("cash") || name.includes("register") || name.includes("counter");
+
+      if (!looksRol) continue;
+
+      const optsTextJoined = Array.from(sel.querySelectorAll("option"))
+        .map((o) => norm2(o.textContent))
+        .join(" ");
+
+      const looksTipo = optsTextJoined.includes("branch") && optsTextJoined.includes("counter") && optsTextJoined.includes("admin");
+      let score =
+        (lab.includes("rol") ? 5 : 0) +
+        (lab.includes("caja") ? 5 : 0) +
+        (lab.includes("counter") ? 4 : 0) +
+        ((id.includes("rol") || name.includes("rol")) ? 3 : 0) +
+        ((id.includes("cash") || name.includes("cash") || id.includes("register") || name.includes("register")) ? 3 : 0) +
+        (looksTipo ? -100 : 0);
+
+      candidates.push({
+        score,
+        label: (labEl.textContent || "").replace(/\s+/g, " ").trim(),
+        id: sel.id || "",
+        name: sel.getAttribute("name") || "",
+        sel,
+      });
+    }
+
+    if (!candidates.length) return { ok: false, missing: true, reason: "No se encontró SELECT candidato para Counter rol" };
+
+    candidates.sort((a, b) => b.score - a.score);
+    const best = candidates[0];
+    if (!best || best.score <= 0) {
+      return { ok: false, missing: true, reason: "No se encontró SELECT válido de Counter rol (score<=0)" };
+    }
+
+    best.sel.setAttribute("data-autofill", "counterrol");
+
+    const opts = Array.from(best.sel.querySelectorAll("option")).map((o) => ({
+      value: String(o.value || "").trim(),
+      text: (o.textContent || "").replace(/\s+/g, " ").trim(),
+    }));
+
+    const wanted = norm2(wantedRaw);
+    const toks = wanted.split(" ").filter(Boolean);
+
+    const isPlaceholder = (o) => {
+      const t = norm2(o.text);
+      const v = norm2(o.value);
+      return t === "---" || v === "---" || t === "" || v === "";
+    };
+
+    const candidatesOpts = opts.filter((o) => !isPlaceholder(o));
+    const tokenMatch = (s) => {
+      const n = norm2(s);
+      if (!n) return false;
+      return toks.length ? toks.every((tk) => n.includes(tk)) : n.includes(wanted);
+    };
+
+    // Match: value exact -> text exact -> includes -> token match
+    let match =
+      candidatesOpts.find((o) => norm2(o.value) === wanted) ||
+      candidatesOpts.find((o) => norm2(o.text) === wanted) ||
+      candidatesOpts.find((o) => norm2(o.value).includes(wanted)) ||
+      candidatesOpts.find((o) => norm2(o.text).includes(wanted)) ||
+      candidatesOpts.find((o) => tokenMatch(o.text)) ||
+      candidatesOpts.find((o) => tokenMatch(o.value));
+
+    // Sinónimos CAJA <-> CASH/REGISTER
+    if (!match) {
+      const wantsCaja = wanted.includes("caja");
+      const wantsCash = wanted.includes("cash") || wanted.includes("register") || wanted.includes("caj");
+      const altNeedles = new Set();
+
+      if (wantsCaja) {
+        altNeedles.add("cash");
+        altNeedles.add("register");
+      }
+      if (wantsCash) {
+        altNeedles.add("caja");
+      }
+
+      const altArr = Array.from(altNeedles);
+      if (altArr.length) {
+        match =
+          candidatesOpts.find((o) => altArr.some((a) => norm2(o.text).includes(a))) ||
+          candidatesOpts.find((o) => altArr.some((a) => norm2(o.value).includes(a))) ||
+          null;
+      }
+    }
+
+    if (!match) {
+      return {
+        ok: false,
+        missing: false,
+        reason: `No hay opción que matchee "${wantedRaw}"`,
+        selectInfo: { label: best.label, id: best.id, name: best.name },
+        available: opts.slice(0, 80),
+      };
+    }
+
+    best.sel.focus();
+    best.sel.value = match.value;
+    best.sel.dispatchEvent(new Event("input", { bubbles: true }));
+    best.sel.dispatchEvent(new Event("change", { bubbles: true }));
+    best.sel.dispatchEvent(new Event("blur", { bubbles: true }));
+
+    return {
+      ok: true,
+      value: match.value,
+      text: match.text,
+      selectInfo: { label: best.label, id: best.id, name: best.name },
+    };
+  }, { wantedRaw });
+
+  // cleanup
+  try {
+    await page.evaluate(() => {
+      const modal = document.querySelector("#adminUsersModal");
+      if (!modal) return;
+      modal.querySelectorAll('[data-autofill="counterrol"]').forEach((x) => x.removeAttribute("data-autofill"));
+    });
+  } catch {}
+
+  if (res.ok) {
+    console.log(
+      `✅ Counter rol: ${res.text} (value=${res.value}) | select="${res.selectInfo?.label}" id="${res.selectInfo?.id}"`
+    );
+    return;
+  }
+
+  if (res.missing) {
+    if (required) throw new Error("❌ Counter rol era requerido pero no está disponible/visible.");
+    console.log("ℹ️ Counter rol no aparece para este tipo de usuario (OK).");
+    return;
+  }
+
+  console.log("⚠️ Counter rol SELECT usado:", res.selectInfo || {});
+  console.log("⚠️ Opciones Counter rol disponibles:", res.available || []);
+  throw new Error(res.reason || "No se pudo seleccionar Counter rol");
 }
 
 /* -------------------------------------------------------------------------- */
@@ -412,11 +704,9 @@ async function hardBlurActiveElement(page) {
   await page.evaluate(() => {
     const ae = document.activeElement;
     if (ae && typeof ae.blur === "function") ae.blur();
-    // también dispara blur si algún framework escucha bubbling
     try {
       ae && ae.dispatchEvent && ae.dispatchEvent(new Event("blur", { bubbles: true }));
     } catch {}
-    // click suave en el body para soltar focus (sin TAB)
     try {
       document.body && document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
       document.body && document.body.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
@@ -487,7 +777,6 @@ async function markBestTypeaheadOption(page, inputSel, wantedRaw) {
     if (!inp) return { ok: false, reason: "No existe inputSel" };
     const inpRect = inp.getBoundingClientRect();
 
-    // limpiar marcas previas
     document.querySelectorAll('[data-autofill="pick"]').forEach((x) => x.removeAttribute("data-autofill"));
 
     const optionSel =
@@ -516,7 +805,6 @@ async function markBestTypeaheadOption(page, inputSel, wantedRaw) {
       return dy * 10 + dx;
     };
 
-    // ordenar por cercanía al input
     pops.sort((a, b) => dist(a) - dist(b));
     const popup = pops[0];
 
@@ -575,16 +863,12 @@ async function markBestTypeaheadOption(page, inputSel, wantedRaw) {
 }
 
 async function keyboardPickTypeaheadIndex(page, inputSel, index) {
-  // En tu UI TAB no selecciona -> NO usamos TAB.
-  // Vamos a: ArrowDown para activar highlight -> mover (index) -> Enter.
   await page.focus(inputSel);
   await sleep(80);
 
-  // activa primer item
   await page.keyboard.press("ArrowDown");
   await sleep(80);
 
-  // ya estamos en index 0, así que baja index veces
   for (let i = 0; i < index; i++) {
     await page.keyboard.press("ArrowDown");
     await sleep(60);
@@ -593,7 +877,6 @@ async function keyboardPickTypeaheadIndex(page, inputSel, index) {
   await page.keyboard.press("Enter");
   await sleep(220);
 
-  // blur sin TAB
   await hardBlurActiveElement(page);
   await sleep(180);
 }
@@ -609,7 +892,6 @@ async function setAutocompleteInAdminModalByLabel(page, labelIncludes, wantedTex
 
   await waitAdminUsersModalOpen(page, { timeout });
 
-  // 1) Encontrar input target dentro del modal
   const found = await page.evaluate(({ labelNorm }) => {
     const modal = document.querySelector("#adminUsersModal");
     if (!modal || !modal.classList.contains("show")) return { ok: false, reason: "No hay #adminUsersModal visible" };
@@ -665,20 +947,17 @@ async function setAutocompleteInAdminModalByLabel(page, labelIncludes, wantedTex
     for (let attempt = 0; attempt < tries.length; attempt++) {
       const query = tries[attempt];
 
-      // limpiar y escribir
       await page.click(inputSel, { clickCount: 3 });
       await page.keyboard.press("Backspace");
       await page.type(inputSel, query, { delay: 35 });
       await sleep(waitPopupMs);
 
-      // esperar popup con items
       try {
         await waitForAnyTypeaheadPopup(page, inputSel, { timeout: popupTimeout });
       } catch {
         console.log("⚠️ No apareció popup (aún). Reintento con otro query si hay.");
       }
 
-      // Recolectar y elegir mejor item
       const pick = await markBestTypeaheadOption(page, inputSel, wantedRaw);
 
       if (!pick.ok) {
@@ -690,13 +969,9 @@ async function setAutocompleteInAdminModalByLabel(page, labelIncludes, wantedTex
         continue;
       }
 
-      console.log(
-        `🔎 Mejor opción detectada: "${pick.picked}" (score=${pick.bestScore}, index=${pick.index})`
-      );
+      console.log(`🔎 Mejor opción detectada: "${pick.picked}" (score=${pick.bestScore}, index=${pick.index})`);
 
-      // ------------------------------------------------------------------
-      // ✅ Estrategia #1: MARK + page.click (click real al elemento)
-      // ------------------------------------------------------------------
+      // ✅ #1 MARK + click real
       try {
         await page.click('[data-autofill="pick"]', { delay: 25 });
         await sleep(220);
@@ -714,9 +989,7 @@ async function setAutocompleteInAdminModalByLabel(page, labelIncludes, wantedTex
         console.log("⚠️ Falló page.click('[data-autofill=\"pick\"]'). Intento otros métodos.", e.message || e);
       }
 
-      // ------------------------------------------------------------------
-      // ✅ Estrategia #2: Teclado determinístico (sin TAB)
-      // ------------------------------------------------------------------
+      // ✅ #2 teclado
       try {
         await keyboardPickTypeaheadIndex(page, inputSel, Math.max(0, pick.index));
         const okSt2 = await waitSucursalCommitted(page, wantedRaw, { timeout: 6500 });
@@ -731,9 +1004,7 @@ async function setAutocompleteInAdminModalByLabel(page, labelIncludes, wantedTex
         console.log("⚠️ Falló teclado index+enter:", e.message || e);
       }
 
-      // ------------------------------------------------------------------
-      // ✅ Estrategia #3: Click por coordenadas (último recurso)
-      // ------------------------------------------------------------------
+      // ✅ #3 mouse coords
       try {
         await page.mouse.move(pick.cx, pick.cy, { steps: 8 });
         await page.mouse.down();
@@ -753,17 +1024,12 @@ async function setAutocompleteInAdminModalByLabel(page, labelIncludes, wantedTex
         console.log("⚠️ Falló mouse coords:", e.message || e);
       }
 
-      // si llegó aquí, reintenta con otro query
       const stNow = await debugSucursalState(page);
       console.log(`⚠️ Intento ${attempt + 1}/${tries.length} falló. Valor ahora="${stNow?.text || ""}"`);
     }
 
-    // final: error con estado
     const stEnd = await debugSucursalState(page);
-    throw new Error(
-      `❌ No se pudo SELECCIONAR la sucursal "${wantedRaw}". Estado final: ` +
-        JSON.stringify(stEnd)
-    );
+    throw new Error(`❌ No se pudo SELECCIONAR la sucursal "${wantedRaw}". Estado final: ` + JSON.stringify(stEnd));
   } finally {
     await page.evaluate(() => {
       const modal = document.querySelector("#adminUsersModal");
@@ -780,6 +1046,7 @@ async function selectTipoUsuario(page) {
   const wanted = (process.env.NEW_USER_TIPO || "BRANCH").trim();
   const r = await selectInAdminModalByLabel(page, "tipo de usuario", wanted, { timeout: 25000 });
   console.log(`✅ Tipo de usuario: ${r.text} (value=${r.value})`);
+  return r;
 }
 
 // ✅ Sucursal (AUTOCOMPLETE INPUT) => SELECCIÓN REAL
@@ -851,7 +1118,11 @@ async function fillCreateUserFromEnv(page) {
   await waitAdminUsersModalOpen(page, { timeout: 30000 });
 
   // 1) Tipo usuario (SELECT)
-  await selectTipoUsuario(page);
+  const tipoRes = await selectTipoUsuario(page);
+
+  // ✅ NUEVO: Counter rol (solo si aparece / requerido en COUNTER|ADMIN)
+  await sleep(350);
+  await selectCounterRolIfPresent(page, tipoRes);
 
   // 2) Sucursal (AUTOCOMPLETE) ✅
   await selectSucursal(page);
@@ -911,11 +1182,10 @@ async function fillCreateUserFromEnv(page) {
     console.log("ℹ️ NEW_USER_PASS vacío -> no se setea contraseña.");
   }
 
-  // Validación final visible
   const st = await debugSucursalState(page);
   console.log("🧪 Estado Sucursal (post fill):", st);
 
-  console.log("✅ Modal Crear usuario llenado (Tipo SELECT + Sucursal AUTOCOMPLETE REAL + Código estable).");
+  console.log("✅ Modal Crear usuario llenado (Tipo SELECT + Counter rol + Sucursal AUTOCOMPLETE REAL + Código estable).");
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1423,7 +1693,6 @@ async function clickCrearUsuarioSiCorresponde(page) {
     return;
   }
 
-  // ✅ re-commit/validación REAL justo antes de crear
   await ensureSucursalCommittedBeforeCreate(page);
 
   await page.waitForFunction(() => {
@@ -1574,7 +1843,7 @@ async function clickCrearUsuarioSiCorresponde(page) {
   await sleep(900);
   await snapshot(page, outDir, "crearUsuario");
 
-  // Llenar inputs + Tipo + Sucursal + Contraseñas
+  // Llenar inputs + Tipo + CounterRol + Sucursal + Contraseñas
   await fillCreateUserFromEnv(page);
   await sleep(400);
   await snapshot(page, outDir, "crearUsuario_lleno");
