@@ -1,16 +1,13 @@
-// scrape_html.js  ✅ COMPLETO Y MODIFICADO (FIX REAL: commit sucursal tipoahead)
+// scrape_html.js
 // --------------------------------------------------------------------------------------------
-// Por qué fallaba:
-// - El input muestra value="ZONAL BOLOGNESI", pero el componente autocomplete valida por "item seleccionado"
-//   (modelo interno). Si solo escribes texto => ng-invalid => "escoge alguna sucursal".
-// Fix aplicado:
-// 1) setAutocompleteInAdminModalByLabel():
-//    - escribe query
-//    - intenta seleccionar por TECLADO (ArrowDown+Enter) (lo más compatible con typeahead)
-//    - si falla, hace CLICK REAL con page.mouse en el item (coordenadas reales del DOM)
-//    - luego valida por ng-invalid/aria-invalid/feedback
-// 2) ensureSucursalCommittedBeforeCreate(): reintenta commit justo antes de "Crear"
-// 3) debugSucursalState(): muestra estado real del control
+// FIX REAL AUTOCOMPLETE (Sucursal):
+// - NO usamos TAB para "confirmar" (en tu UI TAB no selecciona, solo cambia foco).
+// - Estrategia nueva:
+//   1) Escribir query -> detectar popup -> elegir mejor opción -> MARK (data-autofill="pick")
+//      -> page.click('[data-autofill="pick"]') (click real del navegador) -> blur por JS -> validar
+//   2) Fallback: teclado determinístico (ArrowDown hasta índice exacto) + Enter (SIN TAB)
+//   3) Fallback: click por coordenadas (page.mouse) al centro del item
+// - Validación: ng-invalid / aria-invalid / feedback "escoge ... sucursal"
 // --------------------------------------------------------------------------------------------
 
 require("dotenv").config();
@@ -355,26 +352,42 @@ async function debugSucursalState(page) {
     const feedback = g.querySelector(".invalid-feedback, .text-danger");
     const feedbackText = feedback ? (feedback.textContent || "").replace(/\s+/g, " ").trim() : null;
 
-    // a veces hay hidden id (no siempre)
-    const hidden = g.querySelector('input[type="hidden"], input[hidden]');
-    const hiddenVal = hidden ? hidden.value || "" : null;
-
-    return { ok: true, text, classes, ariaInvalid, isInvalid, hiddenVal, feedbackText };
+    return { ok: true, text, classes, ariaInvalid, isInvalid, feedbackText };
   });
 }
 
 function isSucursalFeedbackBlocking(st) {
   const fb = norm(st?.feedbackText || "");
   if (!fb) return false;
-  // tu caso: "escoge alguna sucursal"
   return fb.includes("escoge") || fb.includes("sucursal");
+}
+
+async function waitSucursalCommitted(page, wantedRaw, { timeout = 6000 } = {}) {
+  const wanted = String(wantedRaw || "").trim();
+  const started = Date.now();
+
+  while (Date.now() - started < timeout) {
+    const st = await debugSucursalState(page);
+
+    if (
+      st?.ok &&
+      !st.isInvalid &&
+      !isSucursalFeedbackBlocking(st) &&
+      (wanted ? valueMatchesAllTokens(st.text, wanted) : true)
+    ) {
+      return st;
+    }
+
+    await sleep(180);
+  }
+
+  return null;
 }
 
 async function ensureSucursalCommittedBeforeCreate(page) {
   const st1 = await debugSucursalState(page);
   console.log("🧪 Estado Sucursal (antes de Crear):", st1);
 
-  // si está ok y no inválido y no hay feedback bloqueante
   if (st1.ok && !st1.isInvalid && !isSucursalFeedbackBlocking(st1)) return;
 
   const wanted = (process.env.NEW_USER_SUCURSAL || process.env.NEW_USER_SUCURSAL_VALUE || "").trim();
@@ -389,6 +402,200 @@ async function ensureSucursalCommittedBeforeCreate(page) {
   if (st2.ok && (st2.isInvalid || isSucursalFeedbackBlocking(st2))) {
     throw new Error("❌ Sucursal sigue inválida. Se ve texto, pero el AUTOCOMPLETE no quedó seleccionado realmente.");
   }
+}
+
+/* -------------------------------------------------------------------------- */
+/* ✅ AUTOCOMPLETE (POPUP REAL)                                                */
+/* -------------------------------------------------------------------------- */
+
+async function hardBlurActiveElement(page) {
+  await page.evaluate(() => {
+    const ae = document.activeElement;
+    if (ae && typeof ae.blur === "function") ae.blur();
+    // también dispara blur si algún framework escucha bubbling
+    try {
+      ae && ae.dispatchEvent && ae.dispatchEvent(new Event("blur", { bubbles: true }));
+    } catch {}
+    // click suave en el body para soltar focus (sin TAB)
+    try {
+      document.body && document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      document.body && document.body.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      document.body && document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    } catch {}
+  });
+}
+
+async function waitForAnyTypeaheadPopup(page, inputSel, { timeout = 6000 } = {}) {
+  await page.waitForFunction(
+    (inputSel) => {
+      const inp = document.querySelector(inputSel);
+      if (!inp) return false;
+
+      const isVisible = (el) => {
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        const st = window.getComputedStyle(el);
+        return r.width > 0 && r.height > 0 && st.visibility !== "hidden" && st.display !== "none";
+      };
+
+      const optionSel =
+        "button, a, .dropdown-item, .list-group-item, li, [role='option'], .ng-option, mat-option, .mat-option";
+
+      const popSel = [
+        "ngb-typeahead-window",
+        "typeahead-container",
+        ".dropdown-menu.show",
+        ".list-group",
+        ".autocomplete-suggestions",
+        ".autocomplete-items",
+        "ul[role='listbox']",
+        ".ng-dropdown-panel",
+        ".mat-autocomplete-panel",
+        ".cdk-overlay-container .mat-autocomplete-panel",
+      ].join(",");
+
+      const pops = Array.from(document.querySelectorAll(popSel)).filter(isVisible);
+      if (!pops.length) return false;
+
+      return pops.some((p) => p.querySelectorAll(optionSel).length > 0);
+    },
+    { timeout },
+    inputSel
+  );
+}
+
+async function markBestTypeaheadOption(page, inputSel, wantedRaw) {
+  return await page.evaluate(({ inputSel, wantedRaw }) => {
+    const norm2 = (s) =>
+      String(s || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+
+    const tokens = norm2(wantedRaw).split(" ").filter(Boolean);
+
+    const isVisible = (el) => {
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      const st = window.getComputedStyle(el);
+      return r.width > 0 && r.height > 0 && st.visibility !== "hidden" && st.display !== "none";
+    };
+
+    const inp = document.querySelector(inputSel);
+    if (!inp) return { ok: false, reason: "No existe inputSel" };
+    const inpRect = inp.getBoundingClientRect();
+
+    // limpiar marcas previas
+    document.querySelectorAll('[data-autofill="pick"]').forEach((x) => x.removeAttribute("data-autofill"));
+
+    const optionSel =
+      "button, a, .dropdown-item, .list-group-item, li, [role='option'], .ng-option, mat-option, .mat-option";
+
+    const popSel = [
+      "ngb-typeahead-window",
+      "typeahead-container",
+      ".dropdown-menu.show",
+      ".list-group",
+      ".autocomplete-suggestions",
+      ".autocomplete-items",
+      "ul[role='listbox']",
+      ".ng-dropdown-panel",
+      ".mat-autocomplete-panel",
+      ".cdk-overlay-container .mat-autocomplete-panel",
+    ].join(",");
+
+    const pops = Array.from(document.querySelectorAll(popSel)).filter(isVisible);
+    if (!pops.length) return { ok: false, reason: "No hay popup visible (popSel)" };
+
+    const dist = (p) => {
+      const r = p.getBoundingClientRect();
+      const dy = Math.min(Math.abs(r.top - inpRect.bottom), Math.abs(r.bottom - inpRect.top));
+      const dx = Math.abs(r.left - inpRect.left);
+      return dy * 10 + dx;
+    };
+
+    // ordenar por cercanía al input
+    pops.sort((a, b) => dist(a) - dist(b));
+    const popup = pops[0];
+
+    const nodes = Array.from(popup.querySelectorAll(optionSel))
+      .filter(isVisible)
+      .map((el) => {
+        const raw = (el.innerText || el.textContent || "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .replace(/^[•·]\s*/g, "");
+        const r = el.getBoundingClientRect();
+        return { el, raw, rect: { x: r.x, y: r.y, w: r.width, h: r.height } };
+      })
+      .filter((x) => x.raw);
+
+    const preview = nodes.slice(0, 25).map((n) => n.raw);
+
+    if (!nodes.length) return { ok: false, reason: "Popup sin items visibles", preview };
+
+    const score = (txt) => {
+      const t = norm2(txt);
+      if (!t) return 0;
+      let s = 0;
+      for (const tok of tokens) if (t.includes(tok)) s++;
+      const full = norm2(wantedRaw);
+      if (full && t.includes(full)) s += 3;
+      if (full && t === full) s += 7;
+      return s;
+    };
+
+    let best = null;
+    let bestScore = -1;
+    let bestIndex = -1;
+
+    for (let i = 0; i < nodes.length; i++) {
+      const sc = score(nodes[i].raw);
+      if (sc > bestScore) {
+        bestScore = sc;
+        best = nodes[i];
+        bestIndex = i;
+      }
+    }
+
+    if (!best || bestScore <= 0) {
+      return { ok: false, reason: "No hay match con tokens", preview };
+    }
+
+    best.el.scrollIntoView({ block: "center" });
+    best.el.setAttribute("data-autofill", "pick");
+
+    const cx = best.rect.x + best.rect.w / 2;
+    const cy = best.rect.y + best.rect.h / 2;
+
+    return { ok: true, picked: best.raw, index: bestIndex, bestScore, cx, cy, preview };
+  }, { inputSel, wantedRaw });
+}
+
+async function keyboardPickTypeaheadIndex(page, inputSel, index) {
+  // En tu UI TAB no selecciona -> NO usamos TAB.
+  // Vamos a: ArrowDown para activar highlight -> mover (index) -> Enter.
+  await page.focus(inputSel);
+  await sleep(80);
+
+  // activa primer item
+  await page.keyboard.press("ArrowDown");
+  await sleep(80);
+
+  // ya estamos en index 0, así que baja index veces
+  for (let i = 0; i < index; i++) {
+    await page.keyboard.press("ArrowDown");
+    await sleep(60);
+  }
+
+  await page.keyboard.press("Enter");
+  await sleep(220);
+
+  // blur sin TAB
+  await hardBlurActiveElement(page);
+  await sleep(180);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -451,8 +658,8 @@ async function setAutocompleteInAdminModalByLabel(page, labelIncludes, wantedTex
 
   const tries = [buildAutocompleteQuery(wantedRaw), wantedRaw];
 
-  const waitPopupMs = Number(process.env.AUTOCOMPLETE_WAIT_MS || 900);
-  const maxKeyTries = Number(process.env.AUTOCOMPLETE_KEY_TRIES || 12);
+  const waitPopupMs = Number(process.env.AUTOCOMPLETE_WAIT_MS || 650);
+  const popupTimeout = Number(process.env.AUTOCOMPLETE_POPUP_TIMEOUT_MS || 6500);
 
   try {
     for (let attempt = 0; attempt < tries.length; attempt++) {
@@ -464,161 +671,86 @@ async function setAutocompleteInAdminModalByLabel(page, labelIncludes, wantedTex
       await page.type(inputSel, query, { delay: 35 });
       await sleep(waitPopupMs);
 
-      // 2) Intento #1: SELECCIÓN POR TECLADO (ArrowDown+Enter)
-      // (esto suele disparar el "selectItem" real del componente)
-      let committed = false;
-      for (let k = 0; k < maxKeyTries; k++) {
-        await page.keyboard.press("ArrowDown");
-        await sleep(80);
-        await page.keyboard.press("Enter");
-        await sleep(250);
-
-        // blur suave (a veces el form valida en blur)
-        await page.keyboard.press("Tab");
-        await sleep(150);
-
-        const st = await debugSucursalState(page);
-        if (st.ok && !st.isInvalid && !isSucursalFeedbackBlocking(st) && valueMatchesAllTokens(st.text, wantedRaw)) {
-          console.log(`✅ Sucursal COMMIT OK (teclado): "${st.text}"`);
-          committed = true;
-          break;
-        }
-
-        // volver a focus para otro intento
-        await page.focus(inputSel);
-        await sleep(80);
+      // esperar popup con items
+      try {
+        await waitForAnyTypeaheadPopup(page, inputSel, { timeout: popupTimeout });
+      } catch {
+        console.log("⚠️ No apareció popup (aún). Reintento con otro query si hay.");
       }
 
-      if (committed) return;
-
-      // 3) Intento #2: CLICK REAL con page.mouse (coordenadas del item)
-      const pick = await page.evaluate(({ inputSel, wantedRaw }) => {
-        const norm2 = (s) =>
-          String(s || "")
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "")
-            .replace(/\s+/g, " ")
-            .trim()
-            .toLowerCase();
-
-        const wantedNorm = norm2(wantedRaw);
-        const tokens = wantedNorm.split(" ").filter(Boolean);
-
-        const isVisible = (el) => {
-          if (!el) return false;
-          const r = el.getBoundingClientRect();
-          const st = window.getComputedStyle(el);
-          return r.width > 0 && r.height > 0 && st.visibility !== "hidden" && st.display !== "none";
-        };
-
-        const inp = document.querySelector(inputSel);
-        if (!inp) return { ok: false, reason: "No existe input target" };
-        const inpRect = inp.getBoundingClientRect();
-
-        const owns = inp.getAttribute("aria-owns") || inp.getAttribute("aria-controls");
-        const byId = owns ? document.getElementById(owns) : null;
-
-        const popupCandidates = [
-          byId,
-          ...Array.from(
-            document.querySelectorAll(
-              "ngb-typeahead-window, typeahead-container, .ng-dropdown-panel, .mat-autocomplete-panel, ul[role='listbox'], .dropdown-menu.show, .autocomplete-suggestions, .autocomplete-items"
-            )
-          ),
-        ].filter((x) => x && isVisible(x));
-
-        if (!popupCandidates.length) return { ok: false, reason: "No se encontró popup visible" };
-
-        const dist = (p) => {
-          const r = p.getBoundingClientRect();
-          const dy = Math.min(Math.abs(r.top - inpRect.bottom), Math.abs(r.bottom - inpRect.top));
-          const dx = Math.abs(r.left - inpRect.left);
-          return dy * 10 + dx;
-        };
-
-        popupCandidates.sort((a, b) => dist(a) - dist(b));
-        const popup = popupCandidates[0];
-
-        const nodes = Array.from(
-          popup.querySelectorAll("button, .dropdown-item, li, [role='option'], .ng-option, mat-option")
-        )
-          .filter(isVisible)
-          .map((el) => {
-            const raw = (el.textContent || "").replace(/\s+/g, " ").trim().replace(/^[•·]\s*/g, "");
-            const r = el.getBoundingClientRect();
-            return { el, raw, rect: { x: r.x, y: r.y, w: r.width, h: r.height } };
-          });
-
-        if (!nodes.length) return { ok: false, reason: "Popup sin items visibles" };
-
-        const score = (txt) => {
-          const t = norm2(txt);
-          if (!t) return 0;
-          let s = 0;
-          for (const tok of tokens) if (t.includes(tok)) s++;
-          if (wantedNorm && t.includes(wantedNorm)) s += 3;
-          if (wantedNorm && t === wantedNorm) s += 5;
-          return s;
-        };
-
-        let best = null;
-        let bestScore = 0;
-        for (const n of nodes) {
-          const sc = score(n.raw);
-          if (sc > bestScore) {
-            best = n;
-            bestScore = sc;
-          }
-        }
-
-        const preview = nodes.slice(0, 20).map((n) => n.raw).filter(Boolean);
-
-        if (!best || bestScore === 0) return { ok: false, reason: "No hay match con tokens", preview };
-
-        best.el.scrollIntoView({ block: "center" });
-
-        // devolver coordenadas para click real fuera del evaluate
-        const cx = best.rect.x + best.rect.w / 2;
-        const cy = best.rect.y + best.rect.h / 2;
-
-        return { ok: true, picked: best.raw, bestScore, cx, cy, preview };
-      }, { inputSel, wantedRaw });
+      // Recolectar y elegir mejor item
+      const pick = await markBestTypeaheadOption(page, inputSel, wantedRaw);
 
       if (!pick.ok) {
         if (pick.preview?.length) {
           console.log("⚠️ Opciones visibles (preview):");
           pick.preview.forEach((x) => console.log("   -", x));
         }
-        console.log(`⚠️ Click real no posible: ${pick.reason}`);
-      } else {
-        // CLICK REAL
-        await page.mouse.move(pick.cx, pick.cy, { steps: 8 });
-        await page.mouse.down();
-        await page.mouse.up();
-        await sleep(250);
+        console.log(`⚠️ No pude elegir item (attempt ${attempt + 1}/${tries.length}): ${pick.reason}`);
+        continue;
+      }
 
-        // eventos/blur para forzar validación
-        await page.evaluate((inputSel) => {
-          const inp = document.querySelector(inputSel);
-          if (!inp) return;
-          inp.dispatchEvent(new Event("input", { bubbles: true }));
-          inp.dispatchEvent(new Event("change", { bubbles: true }));
-          inp.dispatchEvent(new Event("blur", { bubbles: true }));
-        }, inputSel);
+      console.log(
+        `🔎 Mejor opción detectada: "${pick.picked}" (score=${pick.bestScore}, index=${pick.index})`
+      );
 
-        // a veces Enter también confirma
-        await page.keyboard.press("Enter");
-        await sleep(200);
-        await page.keyboard.press("Tab");
-        await sleep(200);
+      // ------------------------------------------------------------------
+      // ✅ Estrategia #1: MARK + page.click (click real al elemento)
+      // ------------------------------------------------------------------
+      try {
+        await page.click('[data-autofill="pick"]', { delay: 25 });
+        await sleep(220);
+        await hardBlurActiveElement(page);
 
-        const st = await debugSucursalState(page);
-        if (st.ok && !st.isInvalid && !isSucursalFeedbackBlocking(st) && valueMatchesAllTokens(st.text, wantedRaw)) {
-          console.log(`✅ Sucursal COMMIT OK (click real): "${st.text}"`);
+        const okSt = await waitSucursalCommitted(page, wantedRaw, { timeout: 6500 });
+        if (okSt) {
+          console.log(`✅ Sucursal COMMIT OK (MARK+click): "${okSt.text}"`);
           return;
         }
 
-        console.log(`⚠️ Intento ${attempt + 1}/${tries.length} NO quedó. Estado:`, st);
+        const stA = await debugSucursalState(page);
+        console.log("⚠️ MARK+click no confirmó. Estado:", stA);
+      } catch (e) {
+        console.log("⚠️ Falló page.click('[data-autofill=\"pick\"]'). Intento otros métodos.", e.message || e);
+      }
+
+      // ------------------------------------------------------------------
+      // ✅ Estrategia #2: Teclado determinístico (sin TAB)
+      // ------------------------------------------------------------------
+      try {
+        await keyboardPickTypeaheadIndex(page, inputSel, Math.max(0, pick.index));
+        const okSt2 = await waitSucursalCommitted(page, wantedRaw, { timeout: 6500 });
+        if (okSt2) {
+          console.log(`✅ Sucursal COMMIT OK (teclado index+enter): "${okSt2.text}"`);
+          return;
+        }
+
+        const stB = await debugSucursalState(page);
+        console.log("⚠️ Teclado index+enter no confirmó. Estado:", stB);
+      } catch (e) {
+        console.log("⚠️ Falló teclado index+enter:", e.message || e);
+      }
+
+      // ------------------------------------------------------------------
+      // ✅ Estrategia #3: Click por coordenadas (último recurso)
+      // ------------------------------------------------------------------
+      try {
+        await page.mouse.move(pick.cx, pick.cy, { steps: 8 });
+        await page.mouse.down();
+        await page.mouse.up();
+        await sleep(220);
+        await hardBlurActiveElement(page);
+
+        const okSt3 = await waitSucursalCommitted(page, wantedRaw, { timeout: 6500 });
+        if (okSt3) {
+          console.log(`✅ Sucursal COMMIT OK (mouse coords): "${okSt3.text}"`);
+          return;
+        }
+
+        const stC = await debugSucursalState(page);
+        console.log("⚠️ Mouse coords no confirmó. Estado:", stC);
+      } catch (e) {
+        console.log("⚠️ Falló mouse coords:", e.message || e);
       }
 
       // si llegó aquí, reintenta con otro query
@@ -626,13 +758,19 @@ async function setAutocompleteInAdminModalByLabel(page, labelIncludes, wantedTex
       console.log(`⚠️ Intento ${attempt + 1}/${tries.length} falló. Valor ahora="${stNow?.text || ""}"`);
     }
 
-    throw new Error(`❌ No se pudo SELECCIONAR la sucursal "${wantedRaw}" (se escribe pero no queda seleccionada).`);
+    // final: error con estado
+    const stEnd = await debugSucursalState(page);
+    throw new Error(
+      `❌ No se pudo SELECCIONAR la sucursal "${wantedRaw}". Estado final: ` +
+        JSON.stringify(stEnd)
+    );
   } finally {
     await page.evaluate(() => {
       const modal = document.querySelector("#adminUsersModal");
       if (!modal) return;
       const el = modal.querySelector('[data-autofill="target"]');
       if (el) el.removeAttribute("data-autofill");
+      document.querySelectorAll('[data-autofill="pick"]').forEach((x) => x.removeAttribute("data-autofill"));
     });
   }
 }
