@@ -1,0 +1,62 @@
+# ====== GENERAL ======
+*.log
+*.tmp
+*.temp
+*.DS_Store
+Thumbs.db
+
+# ====== NODE.JS ======
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dist/
+build/
+.env
+.env.*.local
+
+# ====== .NET / VISUAL STUDIO ======
+bin/
+obj/
+Debug/
+Release/
+*.user
+*.suo
+*.cache
+*.dll
+*.pdb
+*.mdb
+
+# ASP.NET Scaffolding
+ScaffoldingReadMe.txt
+
+# Visual Studio cache
+.vs/
+*.vcxproj.user
+
+# ====== VISUAL STUDIO CODE ======
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# ====== WINDOWS ======
+ehthumbs.db
+desktop.ini
+
+# ====== LOGS ======
+logs/
+*.log
+log-*.txt
+
+# ====== IMAGES TEMP ======
+*.png.tmp
+*.jpg.tmp
+
+# ====== SQL / BACKUPS ======
+*.bak
+*.sql
+
+# ====== OTHE
+HTML/
