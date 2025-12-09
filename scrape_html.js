@@ -1,4 +1,18 @@
-// scrape_html.js
+// scrape_html.js  ✅ COMPLETO Y MODIFICADO (FIX REAL: commit sucursal tipoahead)
+// --------------------------------------------------------------------------------------------
+// Por qué fallaba:
+// - El input muestra value="ZONAL BOLOGNESI", pero el componente autocomplete valida por "item seleccionado"
+//   (modelo interno). Si solo escribes texto => ng-invalid => "escoge alguna sucursal".
+// Fix aplicado:
+// 1) setAutocompleteInAdminModalByLabel():
+//    - escribe query
+//    - intenta seleccionar por TECLADO (ArrowDown+Enter) (lo más compatible con typeahead)
+//    - si falla, hace CLICK REAL con page.mouse en el item (coordenadas reales del DOM)
+//    - luego valida por ng-invalid/aria-invalid/feedback
+// 2) ensureSucursalCommittedBeforeCreate(): reintenta commit justo antes de "Crear"
+// 3) debugSucursalState(): muestra estado real del control
+// --------------------------------------------------------------------------------------------
+
 require("dotenv").config();
 const fs = require("fs-extra");
 const path = require("path");
@@ -10,9 +24,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function ts() {
   const d = new Date();
   const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(
-    d.getHours()
-  )}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(
+    d.getMinutes()
+  )}${pad(d.getSeconds())}`;
 }
 
 function ask(question) {
@@ -36,7 +50,7 @@ function norm(s) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* ✅ HELPERS AUTOCOMPLETE (COMMIT REAL + VALIDACIÓN)                          */
+/* ✅ HELPERS AUTOCOMPLETE                                                     */
 /* -------------------------------------------------------------------------- */
 
 function tokensOf(s) {
@@ -55,7 +69,6 @@ function buildAutocompleteQuery(wantedRaw) {
 
   const stop = new Set(["zonal", "planta", "localidad", "sucursal"]);
   const filtered = toks.filter((t) => !stop.has(t));
-
   if (filtered.length) return filtered.join(" ");
   return toks.slice(-2).join(" ");
 }
@@ -109,7 +122,7 @@ async function clickByText(page, text, { timeout = 30000 } = {}) {
 }
 
 /**
- * Snapshot (igual)
+ * Snapshot
  */
 async function snapshot(page, outDir, prefix, { maxWidth = 2400 } = {}) {
   const stamp = ts();
@@ -169,7 +182,8 @@ async function setInputValueNative(page, selector, value, { timeout = 15000 } = 
       const el = document.querySelector(selector);
       if (!el) return { ok: false, reason: "No existe selector" };
 
-      const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const proto =
+        el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
       const desc = Object.getOwnPropertyDescriptor(proto, "value");
       const setter = desc && desc.set;
 
@@ -220,23 +234,25 @@ async function isBootstrapModalOpen(page, modalSelector) {
 /* MODAL "Crear usuario": Tipo usuario + Sucursal                              */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Busca SELECT por label dentro del modal (no depende de IDs duplicados)
- * (Esto sirve para "Tipo de usuario", que sí es <select>)
- */
+async function waitAdminUsersModalOpen(page, { timeout = 25000 } = {}) {
+  await page.waitForFunction(() => {
+    const m = document.querySelector("#adminUsersModal");
+    if (!m) return false;
+    return m.classList.contains("show");
+  }, { timeout });
+}
+
 async function selectInAdminModalByLabel(page, labelIncludes, wantedTextOrValue, { timeout = 20000 } = {}) {
   const wantedNorm = norm(wantedTextOrValue);
   const labelNorm = norm(labelIncludes);
 
-  await page.waitForFunction(() => {
-    const modal = document.querySelector("#adminUsersModal.modal.show") || document.querySelector(".modal.show");
-    return !!modal;
-  }, { timeout });
+  await waitAdminUsersModalOpen(page, { timeout });
 
   const res = await page.evaluate(
     ({ labelNorm, wantedNorm, wantedRaw }) => {
-      const modal = document.querySelector("#adminUsersModal.modal.show") || document.querySelector(".modal.show");
-      if (!modal) return { ok: false, reason: "No hay modal visible" };
+      const modal = document.querySelector("#adminUsersModal");
+      if (!modal || !modal.classList.contains("show"))
+        return { ok: false, reason: "No hay #adminUsersModal visible" };
 
       const norm2 = (s) =>
         String(s || "")
@@ -248,12 +264,12 @@ async function selectInAdminModalByLabel(page, labelIncludes, wantedTextOrValue,
 
       const groups = Array.from(modal.querySelectorAll(".form-group, .input-group, .mb-2, .mb-3"));
       const g = groups.find((x) => {
-        const lab = x.querySelector("label, .input-group-prepend .input-group-text");
+        const lab = x.querySelector("label, .input-group-prepend .input-group-text, .input-group-text");
         const sel = x.querySelector("select");
         return lab && sel && norm2(lab.textContent).includes(labelNorm);
       });
 
-      if (!g) return { ok: false, reason: `No se encontró grupo con label ~ "${labelNorm}"` };
+      if (!g) return { ok: false, reason: `No se encontró grupo con label ~ "${labelNorm}" en #adminUsersModal` };
 
       const sel = g.querySelector("select");
       if (!sel) return { ok: false, reason: "No hay select en el grupo" };
@@ -261,15 +277,13 @@ async function selectInAdminModalByLabel(page, labelIncludes, wantedTextOrValue,
       const opts = Array.from(sel.querySelectorAll("option"));
 
       const wantedLooksValue =
-        /^[0-9]+$/.test(String(wantedRaw).trim()) ||
-        opts.some((o) => String(o.value) === String(wantedRaw).trim());
+        /^[0-9]+$/.test(String(wantedRaw).trim()) || opts.some((o) => String(o.value) === String(wantedRaw).trim());
 
       let match = null;
 
       if (wantedLooksValue) {
         match = opts.find((o) => String(o.value) === String(wantedRaw).trim());
       }
-
       if (!match) {
         match = opts.find((o) => norm2(o.textContent).includes(wantedNorm));
       }
@@ -278,7 +292,7 @@ async function selectInAdminModalByLabel(page, labelIncludes, wantedTextOrValue,
         return {
           ok: false,
           reason: `No hay option que matchee value="${wantedRaw}" ni texto~"${wantedNorm}"`,
-          available: opts.map((o) => ({ value: o.value, text: (o.textContent || "").trim() })).slice(0, 15),
+          available: opts.map((o) => ({ value: o.value, text: (o.textContent || "").trim() })).slice(0, 20),
         };
       }
 
@@ -301,26 +315,14 @@ async function selectInAdminModalByLabel(page, labelIncludes, wantedTextOrValue,
   return res;
 }
 
-/**
- * ✅ Sucursal AUTOCOMPLETE: COMMIT real (click o Enter) + validación de que quedó.
- * (evita que se quede en "ZONAL")
- *
- * Opcional en .env:
- *   AUTOCOMPLETE_WAIT_MS=900
- */
-async function setAutocompleteInAdminModalByLabel(page, labelIncludes, wantedText, { timeout = 25000 } = {}) {
-  const labelNorm = norm(labelIncludes);
-  const wantedRaw = String(wantedText || "").trim();
-  if (!wantedRaw) return;
+/* -------------------------------------------------------------------------- */
+/* ✅ DEBUG/ENSURE SUCURSAL (VALIDACIÓN REAL, NO SOLO TEXTO)                   */
+/* -------------------------------------------------------------------------- */
 
-  await page.waitForFunction(() => {
-    const modal = document.querySelector("#adminUsersModal.modal.show") || document.querySelector(".modal.show");
-    return !!modal;
-  }, { timeout });
-
-  const found = await page.evaluate(({ labelNorm }) => {
-    const modal = document.querySelector("#adminUsersModal.modal.show") || document.querySelector(".modal.show");
-    if (!modal) return { ok: false, reason: "No hay modal visible" };
+async function debugSucursalState(page) {
+  return await page.evaluate(() => {
+    const modal = document.querySelector("#adminUsersModal");
+    if (!modal) return { ok: false, reason: "No existe #adminUsersModal" };
 
     const norm2 = (s) =>
       String(s || "")
@@ -334,37 +336,163 @@ async function setAutocompleteInAdminModalByLabel(page, labelIncludes, wantedTex
     const g = groups.find((x) => {
       const lab = x.querySelector("label, .input-group-prepend .input-group-text, .input-group-text");
       const inp = x.querySelector('input[type="text"]');
-      return lab && inp && norm2(lab.textContent).includes(labelNorm);
+      return lab && inp && norm2(lab.textContent).includes("sucursal");
     });
 
-    if (!g) return { ok: false, reason: `No se encontró grupo con label ~ "${labelNorm}"` };
+    if (!g) return { ok: false, reason: "No encontré el grupo de Sucursal" };
 
     const inp = g.querySelector('input[type="text"]');
-    if (!inp) return { ok: false, reason: "No hay input[type=text] en el grupo" };
+    const text = inp ? inp.value || "" : "";
+    const classes = inp ? inp.className : "";
+    const ariaInvalid = inp ? inp.getAttribute("aria-invalid") : null;
 
+    const isInvalid =
+      (inp && inp.classList.contains("ng-invalid")) ||
+      (inp && inp.classList.contains("is-invalid")) ||
+      ariaInvalid === "true" ||
+      false;
+
+    const feedback = g.querySelector(".invalid-feedback, .text-danger");
+    const feedbackText = feedback ? (feedback.textContent || "").replace(/\s+/g, " ").trim() : null;
+
+    // a veces hay hidden id (no siempre)
+    const hidden = g.querySelector('input[type="hidden"], input[hidden]');
+    const hiddenVal = hidden ? hidden.value || "" : null;
+
+    return { ok: true, text, classes, ariaInvalid, isInvalid, hiddenVal, feedbackText };
+  });
+}
+
+function isSucursalFeedbackBlocking(st) {
+  const fb = norm(st?.feedbackText || "");
+  if (!fb) return false;
+  // tu caso: "escoge alguna sucursal"
+  return fb.includes("escoge") || fb.includes("sucursal");
+}
+
+async function ensureSucursalCommittedBeforeCreate(page) {
+  const st1 = await debugSucursalState(page);
+  console.log("🧪 Estado Sucursal (antes de Crear):", st1);
+
+  // si está ok y no inválido y no hay feedback bloqueante
+  if (st1.ok && !st1.isInvalid && !isSucursalFeedbackBlocking(st1)) return;
+
+  const wanted = (process.env.NEW_USER_SUCURSAL || process.env.NEW_USER_SUCURSAL_VALUE || "").trim();
+  if (!wanted) throw new Error("No hay NEW_USER_SUCURSAL/NEW_USER_SUCURSAL_VALUE para reintentar commit");
+
+  console.log("🔁 Reintentando commit REAL de Sucursal antes de Crear...");
+  await setAutocompleteInAdminModalByLabel(page, "sucursal", wanted, { timeout: 25000 });
+
+  const st2 = await debugSucursalState(page);
+  console.log("🧪 Estado Sucursal (después de re-commit):", st2);
+
+  if (st2.ok && (st2.isInvalid || isSucursalFeedbackBlocking(st2))) {
+    throw new Error("❌ Sucursal sigue inválida. Se ve texto, pero el AUTOCOMPLETE no quedó seleccionado realmente.");
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* ✅ AUTOCOMPLETE SUCURSAL (COMMIT REAL)                                      */
+/* -------------------------------------------------------------------------- */
+
+async function setAutocompleteInAdminModalByLabel(page, labelIncludes, wantedText, { timeout = 25000 } = {}) {
+  const labelNorm = norm(labelIncludes);
+  const wantedRaw = String(wantedText || "").trim();
+  if (!wantedRaw) return;
+
+  await waitAdminUsersModalOpen(page, { timeout });
+
+  // 1) Encontrar input target dentro del modal
+  const found = await page.evaluate(({ labelNorm }) => {
+    const modal = document.querySelector("#adminUsersModal");
+    if (!modal || !modal.classList.contains("show")) return { ok: false, reason: "No hay #adminUsersModal visible" };
+
+    const norm2 = (s) =>
+      String(s || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+
+    modal.querySelectorAll('[data-autofill="target"]').forEach((x) => x.removeAttribute("data-autofill"));
+
+    const groups = Array.from(modal.querySelectorAll(".input-group, .form-group, .mb-2, .mb-3"));
+
+    const candidates = groups
+      .map((x) => {
+        const lab = x.querySelector("label, .input-group-prepend .input-group-text, .input-group-text");
+        const inp = x.querySelector('input[type="text"]');
+        if (!lab || !inp) return null;
+        const lt = norm2(lab.textContent);
+        if (!lt.includes(labelNorm)) return null;
+        return { x, lt };
+      })
+      .filter(Boolean);
+
+    if (!candidates.length) {
+      return { ok: false, reason: `No se encontró grupo con label ~ "${labelNorm}" en #adminUsersModal` };
+    }
+
+    candidates.sort((a, b) => a.lt.length - b.lt.length);
+
+    const g = candidates[0].x;
+    const inp = g.querySelector('input[type="text"]');
     inp.setAttribute("data-autofill", "target");
+    inp.focus();
+
     return { ok: true };
   }, { labelNorm });
 
   if (!found.ok) throw new Error(found.reason);
 
-  const inputSel = '#adminUsersModal [data-autofill="target"], .modal.show [data-autofill="target"]';
+  const inputSel = '#adminUsersModal [data-autofill="target"]';
   await page.waitForSelector(inputSel, { timeout: 15000 });
 
   const tries = [buildAutocompleteQuery(wantedRaw), wantedRaw];
+
+  const waitPopupMs = Number(process.env.AUTOCOMPLETE_WAIT_MS || 900);
+  const maxKeyTries = Number(process.env.AUTOCOMPLETE_KEY_TRIES || 12);
 
   try {
     for (let attempt = 0; attempt < tries.length; attempt++) {
       const query = tries[attempt];
 
+      // limpiar y escribir
       await page.click(inputSel, { clickCount: 3 });
       await page.keyboard.press("Backspace");
       await page.type(inputSel, query, { delay: 35 });
+      await sleep(waitPopupMs);
 
-      await sleep(Number(process.env.AUTOCOMPLETE_WAIT_MS || 900));
+      // 2) Intento #1: SELECCIÓN POR TECLADO (ArrowDown+Enter)
+      // (esto suele disparar el "selectItem" real del componente)
+      let committed = false;
+      for (let k = 0; k < maxKeyTries; k++) {
+        await page.keyboard.press("ArrowDown");
+        await sleep(80);
+        await page.keyboard.press("Enter");
+        await sleep(250);
 
-      // A) intentar click en opción visible
-      const clicked = await page.evaluate((wantedRaw) => {
+        // blur suave (a veces el form valida en blur)
+        await page.keyboard.press("Tab");
+        await sleep(150);
+
+        const st = await debugSucursalState(page);
+        if (st.ok && !st.isInvalid && !isSucursalFeedbackBlocking(st) && valueMatchesAllTokens(st.text, wantedRaw)) {
+          console.log(`✅ Sucursal COMMIT OK (teclado): "${st.text}"`);
+          committed = true;
+          break;
+        }
+
+        // volver a focus para otro intento
+        await page.focus(inputSel);
+        await sleep(80);
+      }
+
+      if (committed) return;
+
+      // 3) Intento #2: CLICK REAL con page.mouse (coordenadas del item)
+      const pick = await page.evaluate(({ inputSel, wantedRaw }) => {
         const norm2 = (s) =>
           String(s || "")
             .normalize("NFD")
@@ -379,93 +507,131 @@ async function setAutocompleteInAdminModalByLabel(page, labelIncludes, wantedTex
         const isVisible = (el) => {
           if (!el) return false;
           const r = el.getBoundingClientRect();
-          return r.width > 0 && r.height > 0;
+          const st = window.getComputedStyle(el);
+          return r.width > 0 && r.height > 0 && st.visibility !== "hidden" && st.display !== "none";
         };
 
-        const nodes = Array.from(
-          document.querySelectorAll(`
-            ngb-typeahead-window .dropdown-item,
-            ngb-typeahead-window button,
-            .dropdown-menu.show .dropdown-item,
-            .dropdown-menu.show button,
-            typeahead-container button,
-            typeahead-container li,
-            .typeahead-container button,
-            .typeahead-container li,
-            ul[role="listbox"] [role="option"],
-            [role="option"],
-            .ng-dropdown-panel .ng-option,
-            .mat-autocomplete-panel mat-option,
-            .autocomplete-items * ,
-            .autocomplete-suggestions *
-          `)
-        ).filter(isVisible);
+        const inp = document.querySelector(inputSel);
+        if (!inp) return { ok: false, reason: "No existe input target" };
+        const inpRect = inp.getBoundingClientRect();
 
-        const score = (el) => {
-          const t = norm2(el.textContent || "");
+        const owns = inp.getAttribute("aria-owns") || inp.getAttribute("aria-controls");
+        const byId = owns ? document.getElementById(owns) : null;
+
+        const popupCandidates = [
+          byId,
+          ...Array.from(
+            document.querySelectorAll(
+              "ngb-typeahead-window, typeahead-container, .ng-dropdown-panel, .mat-autocomplete-panel, ul[role='listbox'], .dropdown-menu.show, .autocomplete-suggestions, .autocomplete-items"
+            )
+          ),
+        ].filter((x) => x && isVisible(x));
+
+        if (!popupCandidates.length) return { ok: false, reason: "No se encontró popup visible" };
+
+        const dist = (p) => {
+          const r = p.getBoundingClientRect();
+          const dy = Math.min(Math.abs(r.top - inpRect.bottom), Math.abs(r.bottom - inpRect.top));
+          const dx = Math.abs(r.left - inpRect.left);
+          return dy * 10 + dx;
+        };
+
+        popupCandidates.sort((a, b) => dist(a) - dist(b));
+        const popup = popupCandidates[0];
+
+        const nodes = Array.from(
+          popup.querySelectorAll("button, .dropdown-item, li, [role='option'], .ng-option, mat-option")
+        )
+          .filter(isVisible)
+          .map((el) => {
+            const raw = (el.textContent || "").replace(/\s+/g, " ").trim().replace(/^[•·]\s*/g, "");
+            const r = el.getBoundingClientRect();
+            return { el, raw, rect: { x: r.x, y: r.y, w: r.width, h: r.height } };
+          });
+
+        if (!nodes.length) return { ok: false, reason: "Popup sin items visibles" };
+
+        const score = (txt) => {
+          const t = norm2(txt);
           if (!t) return 0;
           let s = 0;
           for (const tok of tokens) if (t.includes(tok)) s++;
-          if (wantedNorm && t.includes(wantedNorm)) s += 2;
-          if (wantedNorm && t === wantedNorm) s += 3;
+          if (wantedNorm && t.includes(wantedNorm)) s += 3;
+          if (wantedNorm && t === wantedNorm) s += 5;
           return s;
         };
 
-        let best = null, bestScore = 0;
-        for (const el of nodes) {
-          const sc = score(el);
+        let best = null;
+        let bestScore = 0;
+        for (const n of nodes) {
+          const sc = score(n.raw);
           if (sc > bestScore) {
-            best = el;
+            best = n;
             bestScore = sc;
           }
         }
 
-        if (!best || bestScore === 0) return { ok: false, count: nodes.length };
+        const preview = nodes.slice(0, 20).map((n) => n.raw).filter(Boolean);
 
-        best.scrollIntoView({ block: "center" });
-        best.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
-        best.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-        best.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-        best.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        if (!best || bestScore === 0) return { ok: false, reason: "No hay match con tokens", preview };
 
-        return { ok: true, text: (best.textContent || "").trim(), score: bestScore };
-      }, wantedRaw);
+        best.el.scrollIntoView({ block: "center" });
 
-      if (clicked.ok) {
-        await sleep(300);
-      } else {
-        // B) fallback: ArrowDown + Enter (muchos autocompletes solo comitean así)
-        for (let k = 0; k < 6; k++) {
-          await page.keyboard.press("ArrowDown");
-          await sleep(80);
-          await page.keyboard.press("Enter");
-          await sleep(350);
+        // devolver coordenadas para click real fuera del evaluate
+        const cx = best.rect.x + best.rect.w / 2;
+        const cy = best.rect.y + best.rect.h / 2;
 
-          const val = await page.$eval(inputSel, (el) => el.value || "");
-          if (valueMatchesAllTokens(val, wantedRaw)) break;
+        return { ok: true, picked: best.raw, bestScore, cx, cy, preview };
+      }, { inputSel, wantedRaw });
+
+      if (!pick.ok) {
+        if (pick.preview?.length) {
+          console.log("⚠️ Opciones visibles (preview):");
+          pick.preview.forEach((x) => console.log("   -", x));
         }
-      }
+        console.log(`⚠️ Click real no posible: ${pick.reason}`);
+      } else {
+        // CLICK REAL
+        await page.mouse.move(pick.cx, pick.cy, { steps: 8 });
+        await page.mouse.down();
+        await page.mouse.up();
+        await sleep(250);
 
-      // validar que quedó seleccionado
-      const finalVal = await page.$eval(inputSel, (el) => el.value || "");
-      if (valueMatchesAllTokens(finalVal, wantedRaw)) {
-        // blur para que el UI aplique dependencias
+        // eventos/blur para forzar validación
+        await page.evaluate((inputSel) => {
+          const inp = document.querySelector(inputSel);
+          if (!inp) return;
+          inp.dispatchEvent(new Event("input", { bubbles: true }));
+          inp.dispatchEvent(new Event("change", { bubbles: true }));
+          inp.dispatchEvent(new Event("blur", { bubbles: true }));
+        }, inputSel);
+
+        // a veces Enter también confirma
+        await page.keyboard.press("Enter");
+        await sleep(200);
         await page.keyboard.press("Tab");
         await sleep(200);
 
-        const afterBlur = await page.$eval(inputSel, (el) => el.value || "");
-        if (valueMatchesAllTokens(afterBlur, wantedRaw)) {
-          console.log(`✅ Sucursal COMMIT OK: "${afterBlur}"`);
+        const st = await debugSucursalState(page);
+        if (st.ok && !st.isInvalid && !isSucursalFeedbackBlocking(st) && valueMatchesAllTokens(st.text, wantedRaw)) {
+          console.log(`✅ Sucursal COMMIT OK (click real): "${st.text}"`);
           return;
         }
+
+        console.log(`⚠️ Intento ${attempt + 1}/${tries.length} NO quedó. Estado:`, st);
       }
+
+      // si llegó aquí, reintenta con otro query
+      const stNow = await debugSucursalState(page);
+      console.log(`⚠️ Intento ${attempt + 1}/${tries.length} falló. Valor ahora="${stNow?.text || ""}"`);
     }
 
-    throw new Error(`❌ No se pudo COMMIT-ejar la sucursal "${wantedRaw}" (se queda en valor inválido/por defecto).`);
+    throw new Error(`❌ No se pudo SELECCIONAR la sucursal "${wantedRaw}" (se escribe pero no queda seleccionada).`);
   } finally {
-    // Limpia el marcador SIEMPRE
     await page.evaluate(() => {
-      const el = document.querySelector('[data-autofill="target"]');
+      const modal = document.querySelector("#adminUsersModal");
+      if (!modal) return;
+      const el = modal.querySelector('[data-autofill="target"]');
       if (el) el.removeAttribute("data-autofill");
     });
   }
@@ -478,32 +644,34 @@ async function selectTipoUsuario(page) {
   console.log(`✅ Tipo de usuario: ${r.text} (value=${r.value})`);
 }
 
-// ✅ Sucursal (AUTOCOMPLETE INPUT) => COMMIT real
+// ✅ Sucursal (AUTOCOMPLETE INPUT) => SELECCIÓN REAL
 async function selectSucursal(page) {
-  const textEnv = (process.env.NEW_USER_SUCURSAL || "").trim();        // ej: "ZONAL BOLOGNESI"
-  const valueEnv = (process.env.NEW_USER_SUCURSAL_VALUE || "").trim(); // fallback (si lo usas)
-
+  const textEnv = (process.env.NEW_USER_SUCURSAL || "").trim();
+  const valueEnv = (process.env.NEW_USER_SUCURSAL_VALUE || "").trim();
   const wanted = textEnv || valueEnv;
+
   if (!wanted) {
     console.log("ℹ️ NEW_USER_SUCURSAL vacío -> no selecciona Sucursal.");
     return;
   }
 
   await setAutocompleteInAdminModalByLabel(page, "sucursal", wanted, { timeout: 25000 });
-  console.log(`✅ Sucursal seteada (autocomplete, texto pedido): ${wanted}`);
+  const st = await debugSucursalState(page);
+  console.log(`✅ Sucursal seleccionada (estado):`, st);
 }
 
 // Forzar valor estable para código (por si el UI lo pisa)
 async function forceStableValueInModal(page, selector, value, { tries = 6, waitMs = 220 } = {}) {
   for (let i = 1; i <= tries; i++) {
     await page.evaluate(({ selector, value }) => {
-      const modal = document.querySelector("#adminUsersModal.modal.show") || document.querySelector(".modal.show");
-      if (!modal) throw new Error("No hay modal visible");
+      const modal = document.querySelector("#adminUsersModal");
+      if (!modal || !modal.classList.contains("show")) throw new Error("No hay #adminUsersModal visible");
 
       const el = modal.querySelector(selector);
       if (!el) throw new Error("No existe selector en modal: " + selector);
 
-      const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const proto =
+        el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
       const desc = Object.getOwnPropertyDescriptor(proto, "value");
       const setter = desc && desc.set;
 
@@ -519,9 +687,9 @@ async function forceStableValueInModal(page, selector, value, { tries = 6, waitM
     await sleep(waitMs);
 
     const now = await page.evaluate((selector) => {
-      const modal = document.querySelector("#adminUsersModal.modal.show") || document.querySelector(".modal.show");
+      const modal = document.querySelector("#adminUsersModal");
       const el = modal ? modal.querySelector(selector) : null;
-      return el ? (el.value || "") : null;
+      return el ? el.value || "" : null;
     }, selector);
 
     if (String(now) === String(value)) {
@@ -542,31 +710,29 @@ async function fillCreateUserFromEnv(page) {
   const EMAIL = (process.env.NEW_USER_EMAIL || "").trim();
   const PASS = (process.env.NEW_USER_PASS || "").trim();
 
-  await page.waitForFunction(() => {
-    const m = document.querySelector("#adminUsersModal.modal.show") || document.querySelector(".modal.show");
-    return !!m;
-  }, { timeout: 30000 });
+  await waitAdminUsersModalOpen(page, { timeout: 30000 });
 
   // 1) Tipo usuario (SELECT)
   await selectTipoUsuario(page);
 
-  // 2) Sucursal (AUTOCOMPLETE INPUT) ✅ COMMIT
+  // 2) Sucursal (AUTOCOMPLETE) ✅
   await selectSucursal(page);
 
-  // pequeña pausa para que el UI aplique dependencias
   await sleep(350);
 
   // 3) Nombre / Correo
   if (NAME) await setInputValueNative(page, "#User_U_NAME", NAME);
   if (EMAIL) await setInputValueNative(page, "#User_E_Mail", EMAIL);
 
-  // 4) Código (forzado)
+  // 4) Código
   if (CODE) await forceStableValueInModal(page, "#User_USER_CODE", CODE);
 
-  // 5) Contraseñas por label "contraseña" dentro del modal
+  // 5) Contraseñas
   if (PASS) {
     const done = await page.evaluate((PASS) => {
-      const modal = document.querySelector("#adminUsersModal.modal.show") || document.querySelector(".modal.show") || document;
+      const modal = document.querySelector("#adminUsersModal");
+      if (!modal || !modal.classList.contains("show")) return { ok: false, reason: "No hay #adminUsersModal" };
+
       const norm2 = (s) =>
         String(s || "")
           .normalize("NFD")
@@ -577,7 +743,7 @@ async function fillCreateUserFromEnv(page) {
 
       const groups = Array.from(modal.querySelectorAll(".input-group, .form-group"));
       const passGroups = groups.filter((g) => {
-        const lab = g.querySelector("label, .input-group-prepend .input-group-text");
+        const lab = g.querySelector("label, .input-group-prepend .input-group-text, .input-group-text");
         const inp = g.querySelector("input");
         return lab && inp && norm2(lab.textContent).includes("contrasena");
       });
@@ -601,19 +767,23 @@ async function fillCreateUserFromEnv(page) {
       return { ok: true, count };
     }, PASS);
 
+    if (!done.ok) throw new Error(done.reason || "No se pudo setear contraseñas");
     console.log(`✅ Contraseñas seteadas en ${done.count} input(s)`);
   } else {
     console.log("ℹ️ NEW_USER_PASS vacío -> no se setea contraseña.");
   }
 
-  console.log("✅ Modal Crear usuario llenado (Tipo por SELECT + Sucursal por AUTOCOMPLETE + Código estable).");
+  // Validación final visible
+  const st = await debugSucursalState(page);
+  console.log("🧪 Estado Sucursal (post fill):", st);
+
+  console.log("✅ Modal Crear usuario llenado (Tipo SELECT + Sucursal AUTOCOMPLETE REAL + Código estable).");
 }
 
 /* -------------------------------------------------------------------------- */
 /* FIX: CLICK GUARDAR MÁS RÁPIDO                                               */
 /* -------------------------------------------------------------------------- */
 
-// Click rápido: intenta inmediato y si no está, espera poco y reintenta
 async function clickButtonInContainerByText(page, containerSelector, textWanted, { timeout = 12000 } = {}) {
   const wanted = norm(textWanted);
   const started = Date.now();
@@ -635,7 +805,6 @@ async function clickButtonInContainerByText(page, containerSelector, textWanted,
       if (!btn) return { ok: false, reason: "No existe botón aún" };
 
       btn.scrollIntoView({ block: "center", inline: "center" });
-
       btn.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
       btn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
       btn.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
@@ -645,7 +814,6 @@ async function clickButtonInContainerByText(page, containerSelector, textWanted,
     }, { containerSelector, wanted });
 
     if (res.ok) return;
-
     await sleep(200);
   }
 
@@ -656,7 +824,6 @@ async function clickButtonInContainerByText(page, containerSelector, textWanted,
 /* MÓDULOS (modal #modulesModal)                                               */
 /* -------------------------------------------------------------------------- */
 
-// Click del botón (fa-list) "Módulos" SOLO SI NO ESTÁ ABIERTO
 async function clickModulosButton(page, { timeout = 20000 } = {}) {
   if (await isBootstrapModalOpen(page, "#modulesModal")) {
     console.log("ℹ️ modulesModal ya está abierto -> no se vuelve a abrir.");
@@ -880,7 +1047,6 @@ async function applyModulesTemplate(page, templateObj) {
   }, templateObj);
 }
 
-// ✅ CLICK GUARDAR MÓDULOS MÁS RÁPIDO (no espera cierre)
 async function clickGuardarModulesModal(page, { timeout = 12000 } = {}) {
   const started = Date.now();
 
@@ -914,7 +1080,7 @@ async function clickGuardarModulesModal(page, { timeout = 12000 } = {}) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* TABS                                                                         */
+/* TABS                                                                        */
 /* -------------------------------------------------------------------------- */
 
 async function activateTabByText(page, tabText, { timeout = 15000 } = {}) {
@@ -1109,7 +1275,7 @@ async function applyCamposTemplateGeneric(page, containerSelector, templateObj) 
 }
 
 /* -------------------------------------------------------------------------- */
-/* CREAR (botón final)                                                         */
+/* CREAR (botón final)                                                        */
 /* -------------------------------------------------------------------------- */
 
 async function clickCrearUsuarioSiCorresponde(page) {
@@ -1118,6 +1284,9 @@ async function clickCrearUsuarioSiCorresponde(page) {
     console.log("ℹ️ AUTO_CREATE=false -> NO se hace click en 'Crear'.");
     return;
   }
+
+  // ✅ re-commit/validación REAL justo antes de crear
+  await ensureSucursalCommittedBeforeCreate(page);
 
   await page.waitForFunction(() => {
     const modal = document.querySelector("#adminUsersModal") || document;
@@ -1145,7 +1314,7 @@ async function clickCrearUsuarioSiCorresponde(page) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* MAIN                                                                        */
+/* MAIN                                                                       */
 /* -------------------------------------------------------------------------- */
 
 (async () => {
@@ -1267,7 +1436,7 @@ async function clickCrearUsuarioSiCorresponde(page) {
   await sleep(900);
   await snapshot(page, outDir, "crearUsuario");
 
-  // Llenar inputs + Tipo + Sucursal(AUTOCOMPLETE) + Contraseñas
+  // Llenar inputs + Tipo + Sucursal + Contraseñas
   await fillCreateUserFromEnv(page);
   await sleep(400);
   await snapshot(page, outDir, "crearUsuario_lleno");

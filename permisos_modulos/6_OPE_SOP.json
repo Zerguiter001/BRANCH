@@ -1,0 +1,98 @@
+[
+  { "title": "Oferta de venta", "activo": false, "escritura": false },
+  { "title": "Orden de venta", "activo": false, "escritura": false },
+  { "title": "Entregas", "activo": false, "escritura": false },
+  { "title": "Facturas", "activo": false, "escritura": false },
+  { "title": "Devoluciones", "activo": false, "escritura": false },
+  { "title": "Nota de débito", "activo": false, "escritura": false },
+  { "title": "Nota de crédito", "activo": false, "escritura": false },
+  { "title": "Factura de reserva", "activo": false, "escritura": false },
+
+  { "title": "Orden de compra", "activo": false, "escritura": false },
+  { "title": "Solicitud de compra", "activo": true, "escritura": false },
+  { "title": "Entrada de mercancia compras", "activo": false, "escritura": false },
+  { "title": "Devolucion de mercancia compras", "activo": false, "escritura": false },
+  { "title": "Factura de proveedor", "activo": false, "escritura": false },
+  { "title": "Nota de crédito proveedor", "activo": false, "escritura": false },
+
+  { "title": "Socio de Negocios", "activo": true, "escritura": false },
+  { "title": "Articulos de Inventario", "activo": true, "escritura": false },
+
+  { "title": "Pagos Recibidos", "activo": false, "escritura": false },
+  { "title": "Pagos efectuados", "activo": false, "escritura": false },
+
+  { "title": "Trasnsferencia de stock", "activo": true, "escritura": true },
+  { "title": "Solicitus de transferencia", "activo": true, "escritura": true },
+  { "title": "Entrada de mercancia", "activo": false, "escritura": false },
+  { "title": "Salida de mercancia", "activo": false, "escritura": false },
+
+  { "title": "Revalorización de inventario", "activo": false, "escritura": false },
+
+  { "title": "Documentos por autorizar", "activo": false, "escritura": false },
+  { "title": "Documentos autorizados", "activo": false, "escritura": false },
+
+  { "title": "Consultas", "activo": true, "escritura": false },
+  { "title": "Administración de usuarios", "activo": false, "escritura": false },
+  { "title": "Sucursales", "activo": false, "escritura": false },
+  { "title": "Configuracion Global", "activo": false, "escritura": false },
+
+  { "title": "Venta de mostrador", "activo": false, "escritura": false },
+
+  { "title": "Inventario", "activo": false, "escritura": false },
+
+  { "title": "Reportes", "activo": true, "escritura": true },
+  { "title": "Cobranza", "activo": false, "escritura": false },
+  { "title": "Depositos bancarios", "activo": false, "escritura": false },
+  { "title": "Re-impresion", "activo": false, "escritura": false },
+
+  { "title": "Cierres y cortes", "activo": false, "escritura": false },
+
+  { "title": "Facturas de anticipo", "activo": false, "escritura": false },
+
+  { "title": "Cierres de sucursales", "activo": false, "escritura": false },
+
+  { "title": "Figuras de Transporte", "activo": false, "escritura": false },
+  { "title": "Transportes", "activo": false, "escritura": false },
+  { "title": "Carta Porte", "activo": false, "escritura": false },
+
+  { "title": "Documentos pendientes timbre", "activo": false, "escritura": false },
+  { "title": "Gestión Citibanamex", "activo": false, "escritura": false },
+  { "title": "Admin. Rutas", "activo": false, "escritura": false },
+  { "title": "Imprimir etiquetas de artículos", "activo": false, "escritura": false },
+  { "title": "Documentos por Cliente", "activo": false, "escritura": false },
+  { "title": "Monedero Electrónico", "activo": false, "escritura": false },
+  { "title": "Precios de Entrega", "activo": false, "escritura": false },
+  { "title": "Previsiones", "activo": false, "escritura": false },
+  { "title": "Asistente MRP", "activo": false, "escritura": false },
+
+  { "title": "Recomendación de pedido", "activo": false, "escritura": false },
+  { "title": "Lista de Materiales", "activo": true, "escritura": false },
+  { "title": "Orden de Fabricación", "activo": true, "escritura": false },
+  { "title": "Recibo de Producción", "activo": true, "escritura": false },
+  { "title": "Emisión para Producción", "activo": true, "escritura": false },
+  { "title": "Datos maestros del recurso", "activo": true, "escritura": false },
+  { "title": "Asistente de confirmación de aprovisionamiento", "activo": false, "escritura": false },
+  { "title": "Admin. Horarios", "activo": false, "escritura": false },
+  { "title": "Embajadores", "activo": false, "escritura": false },
+  { "title": "Referidos", "activo": false, "escritura": false },
+  { "title": "Administrador de referidos", "activo": false, "escritura": false },
+  { "title": "Sugerido de resurtidos", "activo": false, "escritura": false },
+  { "title": "Devolución y/o Cancelaciones", "activo": false, "escritura": false },
+
+  { "title": "Entregas(COUNTER ONE)", "activo": false, "escritura": false },
+
+  { "title": "Admin. de usuarios(M-Ventas)", "activo": false, "escritura": false },
+  { "title": "Admin. Rutas vendedores", "activo": false, "escritura": false },
+
+  { "title": "Oferta de compra", "activo": false, "escritura": false },
+  { "title": "Factura de anticipo de proveedor", "activo": false, "escritura": false },
+  { "title": "Lista de Precios", "activo": false, "escritura": false },
+  { "title": "Admin. Almacén", "activo": false, "escritura": false },
+  { "title": "Recuento de inventario", "activo": false, "escritura": false },
+  { "title": "Contabilización de stock", "activo": false, "escritura": false },
+
+  { "title": "Documentos Preliminares", "activo": false, "escritura": false },
+
+  { "title": "Timbrado de nominas", "activo": false, "escritura": false },
+  { "title": "Modelos de Autorización(BRANCH)", "activo": false, "escritura": false }
+]
