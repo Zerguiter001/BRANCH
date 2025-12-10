@@ -3,109 +3,137 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>SAP Scraper Web</title>
+  <title>BRANCH | Creación Usuarios</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <style>
-    body { background: linear-gradient(to bottom, #f8f9fa, #e9ecef); }
+    body { background: linear-gradient(to bottom, #f8f9fa, #e9ecef); font-size: 1rem; }
     .card { border: none; border-radius: 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
-    .card-title { color: #343a40; font-weight: 600; }
-    .btn-primary { background-color: #007bff; border: none; transition: all 0.3s; }
+    .card-body { padding: 2rem; }
+    .card-title { color: #343a40; font-weight: 600; font-size: 1.25rem; }
+    .btn-primary { background-color: #007bff; border: none; transition: all 0.3s; font-size: 1rem; padding: 0.75rem; }
     .btn-primary:hover { background-color: #0056b3; transform: translateY(-2px); }
     pre { background: #1e2125; color: #d6deeb; padding: 15px; border-radius: 12px; max-height: 450px; overflow: auto; font-size: 0.9rem; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-    .form-label { font-weight: 500; color: #495057; }
-    .alert { border-radius: 10px; }
+    .form-label { font-weight: 500; color: #495057; font-size: 1rem; }
+    .form-control, .form-select { font-size: 1rem; padding: 0.75rem; }
+    .alert { border-radius: 10px; font-size: 0.95rem; padding: 1rem; }
     .badge { padding: 0.5em 0.75em; font-size: 0.9em; }
     .icon-spin { animation: fa-spin 1s infinite linear; }
     @keyframes fa-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    #tplView { max-height: 450px; overflow: auto; }
-    .table th, .table td { vertical-align: middle; }
+    #tplView { max-height: 500px; overflow: auto; }
+    .table th, .table td { vertical-align: middle; font-size: 0.95rem; }
+    .table th .form-check-input { margin-top: 0; }
+    hr { margin: 3rem 0; }
+    .section-title { margin-bottom: 2rem; }
+    @media (max-width: 768px) {
+      .card-body { padding: 1.5rem; }
+      .btn-primary { font-size: 0.9rem; padding: 0.6rem; }
+      .form-control, .form-select { font-size: 0.9rem; padding: 0.6rem; }
+    }
+    .table td input { width: 100%; min-width: 100px; }
   </style>
 </head>
 <body>
 <div class="container py-5">
-
-  <div class="d-flex align-items-center justify-content-between mb-4">
-    <h3 class="m-0 fw-bold text-dark">SAP Scraper Web</h3>
-    <span class="badge bg-secondary">MVP</span>
+  <div class="d-flex align-items-center justify-content-between mb-5">
+    <h3 class="m-0 fw-bold text-dark">Creación Usuarios</h3>
   </div>
-
-  <div class="row g-4">
-    <div class="col-lg-6">
+  <div class="row g-4 mb-5">
+    <div class="col-12">
       <div class="card">
         <div class="card-body">
-          <h5 class="card-title"><i class="fas fa-play me-2 text-primary"></i>1) Ejecutar desde Excel</h5>
-
-          <div class="mb-3">
-            <label class="form-label">Archivo Excel (.xlsx)</label>
+          <h5 class="card-title"><i class="fas fa-eye me-2 text-primary"></i>1) Data</h5>
+          <div class="mb-4">
+            <label class="form-label">Cargar desde Archivo Excel (.xlsx)</label>
             <div class="input-group">
               <span class="input-group-text"><i class="fas fa-file-excel"></i></span>
-              <input id="excel" class="form-control" type="file" accept=".xlsx,.xls"/>
+              <input id="previewExcel" class="form-control" type="file" accept=".xlsx,.xls"/>
             </div>
           </div>
-
-          <div class="mb-3">
-            <label class="form-label">Template de Permisos</label>
-            <select id="permisosFile" class="form-select">
-              <!-- Options will be populated dynamically -->
-            </select>
+          <div class="d-flex gap-2 mb-4">
+            <button id="btnAddManualRow" class="btn btn-success"><i class="fas fa-plus me-2"></i>Agregar Fila</button>
+            <button id="btnClearTable" class="btn btn-warning"><i class="fas fa-eraser me-2"></i>Limpiar Tabla</button>
           </div>
-
-          <div class="form-check mb-2">
-            <input id="autoCreate" class="form-check-input" type="checkbox">
-            <label class="form-check-label">AUTO_CREATE (crear usuarios)</label>
-          </div>
-
-          <div class="form-check mb-3">
-            <input id="headless" class="form-check-input" type="checkbox">
-            <label class="form-check-label">HEADLESS</label>
-          </div>
-
-          <button id="btnRun" class="btn btn-primary mt-2 w-100"><i class="fas fa-rocket me-2"></i>Iniciar Job</button>
-
-          <div class="alert alert-info mt-4 mb-0 rounded-3">
-            <i class="fas fa-info-circle me-2"></i><b>Nota:</b> Cada fila en el Excel representa una corrida (login + acciones). Para procesar muchos usuarios, considera bajar la concurrencia.
+          <div style="max-height: 500px; overflow: auto;">
+            <table id="dataTable" class="table table-bordered table-hover">
+              <thead>
+                <tr>
+                  <th>NEW_USER_SUCURSAL</th>
+                  <th>NEW_USER_CODE</th>
+                  <th>NEW_USER_NAME</th>
+                  <th>NEW_USER_EMAIL</th>
+                  <th>NEW_USER_PASS</th>
+                  <th>NEW_USER_TIPO</th>
+                  <th>NEW_USER_COUNTER_ROL</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
           </div>
         </div>
       </div>
     </div>
-
+  </div>
+  <div class="row g-4 mb-5">
     <div class="col-lg-6">
       <div class="card">
         <div class="card-body">
-          <h5 class="card-title"><i class="fas fa-tasks me-2 text-primary"></i>2) Estado del Job</h5>
-          <div class="mb-2">
+          <h5 class="card-title"><i class="fas fa-play me-2 text-primary"></i>2) Ejecutar</h5>
+          <div class="mb-4">
+            <label class="form-label">Template de Permisos</label>
+            <select id="permisosFile" class="form-select" required>
+              <!-- Options will be populated dynamically -->
+            </select>
+          </div>
+          <div class="form-check mb-3">
+            <input id="autoCreate" class="form-check-input" type="checkbox" checked>
+            <label class="form-check-label">AUTO_CREATE (crear usuarios)</label>
+          </div>
+          <div class="form-check mb-4">
+            <input id="headless" class="form-check-input" type="checkbox" checked>
+            <label class="form-check-label">HEADLESS</label>
+          </div>
+          <button id="btnRun" class="btn btn-primary w-100"><i class="fas fa-rocket me-2"></i>Crear usuario</button>
+          <div class="alert alert-info mt-4 mb-0 rounded-3">
+            <i class="fas fa-info-circle me-2"></i><b>Nota:</b> Cada fila en la data representa una corrida (login + acciones). Para procesar muchos usuarios, considera bajar la concurrencia.
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="card">
+        <div class="card-body">
+          <h5 class="card-title"><i class="fas fa-tasks me-2 text-primary"></i>3) Estado del servicio</h5>
+          <div class="mb-3">
             <span class="text-muted">Job ID:</span> <span id="jobId" class="mono fw-medium"></span>
           </div>
-          <div class="mb-2">
+          <div class="mb-3">
             <span class="text-muted">Estado:</span> <span id="status" class="badge bg-secondary">-</span>
           </div>
-          <div class="mb-3">
+          <div class="mb-4">
             <span class="text-muted">Progreso:</span> <span id="progress" class="mono fw-medium">-</span>
           </div>
-
           <div id="results" class="mt-3"></div>
         </div>
       </div>
     </div>
   </div>
-
   <hr class="my-5 border-2 opacity-50"/>
-
   <div class="card">
     <div class="card-body">
-      <div class="d-flex align-items-center justify-content-between mb-3">
-        <h5 class="card-title m-0"><i class="fas fa-shield-alt me-2 text-primary"></i>3) Gestión de Permisos</h5>
+      <div class="d-flex align-items-center justify-content-between mb-4">
+        <h5 class="card-title m-0"><i class="fas fa-shield-alt me-2 text-primary"></i>4) Gestión de Permisos</h5>
         <div class="d-flex gap-2">
           <button class="btn btn-outline-secondary btn-sm" id="btnReloadTemplates"><i class="fas fa-sync-alt me-1"></i>Refrescar</button>
           <button class="btn btn-outline-primary btn-sm" id="btnNewTemplate"><i class="fas fa-plus me-1"></i>Nuevo</button>
         </div>
       </div>
-
-      <div class="row g-3">
+      <div class="row g-4">
         <div class="col-md-4">
-          <label class="form-label">Templates Disponibles</label>
+          <label class="form-label">Permisos Módulos</label>
           <select id="tplList" class="form-select"></select>
           <div class="d-flex gap-2 mt-3">
             <button class="btn btn-sm btn-outline-primary w-100" id="btnEdit"><i class="fas fa-edit me-1"></i>Editar</button>
@@ -119,9 +147,7 @@
       </div>
     </div>
   </div>
-
 </div>
-
 <!-- Modal editor -->
 <div class="modal fade" id="editorModal" tabindex="-1">
   <div class="modal-dialog modal-xl modal-dialog-scrollable">
@@ -131,30 +157,24 @@
         <button class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <div class="mb-3">
+        <div class="mb-4">
           <label class="form-label">Nombre del Template</label>
           <input id="editFileName" class="form-control mono" disabled/>
           <input type="hidden" id="editFullFileName"/>
         </div>
-        <div class="d-flex gap-2 mb-3">
-          <button class="btn btn-sm btn-info" id="editSelectAllActivo"><i class="fas fa-check-circle me-1"></i>Marcar Todos Activo</button>
-          <button class="btn btn-sm btn-secondary" id="editDeselectAllActivo"><i class="fas fa-times-circle me-1"></i>Desmarcar Todos Activo</button>
-          <button class="btn btn-sm btn-info" id="editSelectAllEscritura"><i class="fas fa-check-circle me-1"></i>Marcar Todos Escritura</button>
-          <button class="btn btn-sm btn-secondary" id="editDeselectAllEscritura"><i class="fas fa-times-circle me-1"></i>Desmarcar Todos Escritura</button>
-        </div>
-        <div style="max-height: 400px; overflow: auto;">
+        <div style="max-height: 500px; overflow: auto;">
           <table id="editTable" class="table table-striped table-hover">
             <thead>
               <tr>
                 <th>Título</th>
-                <th>Activo</th>
-                <th>Escritura</th>
+                <th><input type="checkbox" class="form-check-input" id="editSelectAllActivo"> Activo</th>
+                <th><input type="checkbox" class="form-check-input" id="editSelectAllEscritura"> Escritura</th>
               </tr>
             </thead>
             <tbody></tbody>
           </table>
         </div>
-        <div class="form-text mt-2">Edita los permisos marcando o desmarcando las casillas en la tabla.</div>
+        <div class="form-text mt-3">Edita los permisos marcando o desmarcando las casillas en la tabla.</div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
@@ -163,7 +183,6 @@
     </div>
   </div>
 </div>
-
 <!-- Modal nuevo -->
 <div class="modal fade" id="newModal" tabindex="-1">
   <div class="modal-dialog modal-xl modal-dialog-scrollable">
@@ -173,27 +192,23 @@
         <button class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <label class="form-label">Nombre del Template</label>
-        <input id="newName" class="form-control" placeholder="ej: OPE_FIN o cajera_turno_noche"/>
-        <div class="d-flex gap-2 mb-3 mt-3">
-          <button class="btn btn-sm btn-info" id="newSelectAllActivo"><i class="fas fa-check-circle me-1"></i>Marcar Todos Activo</button>
-          <button class="btn btn-sm btn-secondary" id="newDeselectAllActivo"><i class="fas fa-times-circle me-1"></i>Desmarcar Todos Activo</button>
-          <button class="btn btn-sm btn-info" id="newSelectAllEscritura"><i class="fas fa-check-circle me-1"></i>Marcar Todos Escritura</button>
-          <button class="btn btn-sm btn-secondary" id="newDeselectAllEscritura"><i class="fas fa-times-circle me-1"></i>Desmarcar Todos Escritura</button>
+        <div class="mb-4">
+          <label class="form-label">Nombre del Template</label>
+          <input id="newName" class="form-control" placeholder="ej: OPE_FIN o cajera_turno_noche"/>
         </div>
-        <div style="max-height: 400px; overflow: auto;">
+        <div style="max-height: 500px; overflow: auto;">
           <table id="newTable" class="table table-striped table-hover">
             <thead>
               <tr>
                 <th>Título</th>
-                <th>Activo</th>
-                <th>Escritura</th>
+                <th><input type="checkbox" class="form-check-input" id="newSelectAllActivo"> Activo</th>
+                <th><input type="checkbox" class="form-check-input" id="newSelectAllEscritura"> Escritura</th>
               </tr>
             </thead>
             <tbody></tbody>
           </table>
         </div>
-        <div class="form-text mt-2">Configura los permisos marcando o desmarcando las casillas. El archivo se guardará automáticamente con un identificador único.</div>
+        <div class="form-text mt-3">Configura los permisos marcando o desmarcando las casillas. El archivo se guardará automáticamente con un identificador único.</div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
@@ -202,14 +217,30 @@
     </div>
   </div>
 </div>
-
+<!-- Modal para editar celda -->
+<div class="modal fade" id="editCellModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Editar Valor</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <textarea id="editCellText" class="form-control" rows="5"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btnSaveCell">Guardar</button>
+      </div>
+    </div>
+  </div>
+</div>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
   const $ = (id) => document.getElementById(id);
-
   let pollTimer = null;
   let currentJobId = null;
-
+  let currentInput = null;
   const defaultPermissions = [
     { "title": "Oferta de venta", "activo": false, "escritura": false },
     { "title": "Orden de venta", "activo": true, "escritura": false },
@@ -287,17 +318,14 @@
     { "title": "Timbrado de nominas", "activo": false, "escritura": false },
     { "title": "Modelos de Autorización(BRANCH)", "activo": false, "escritura": false }
   ];
-
   async function api(url, opts={}) {
     const r = await fetch(url, opts);
     const t = await r.text();
     try { return JSON.parse(t); } catch { return { ok:false, error:t }; }
   }
-
   function niceName(f) {
     return f.replace(/^\d+_/, '').replace(/\.json$/, '');
   }
-
   async function loadPermisosTemplatesInto(selectId) {
     const r = await api("/api/templates/permisos");
     const sel = $(selectId);
@@ -306,13 +334,11 @@
       sel.innerHTML = `<option value="">(error cargando templates)</option>`;
       return;
     }
-    sel.innerHTML = `<option value="">(sin template)</option>` + r.files.map(f => `<option value="${f}">${niceName(f)}</option>`).join("");
+    sel.innerHTML = r.files.map(f => `<option value="${f}">${niceName(f)}</option>`).join("");
   }
-
   async function showJob(jobId) {
     const r = await api(`/api/jobs/${jobId}`);
     if (!r.ok) return;
-
     const job = r.job;
     $("jobId").textContent = job.id;
     $("status").textContent = job.status;
@@ -321,21 +347,17 @@
       job.status === "running" ? "bg-primary" :
       job.status === "error" ? "bg-danger" : "bg-secondary"
     );
-
     $("progress").textContent = `${job.doneRows || 0}/${job.totalRows || 0}`;
-
     const div = $("results");
     div.innerHTML = "";
-
     if (job.error) {
       div.innerHTML += `<div class="alert alert-danger rounded-3">${job.error}</div>`;
     }
-
     if (job.results && job.results.length) {
       const rows = job.results.map(x => {
         const badge = x.status === "ok" ? "success" : (x.status === "error" ? "danger" : "secondary");
         return `
-          <div class="border rounded p-3 mb-2 bg-white shadow-sm">
+          <div class="border rounded p-3 mb-3 bg-white shadow-sm">
             <div class="d-flex align-items-center justify-content-between">
               <div>
                 <span class="badge bg-${badge}">${x.status.toUpperCase()}</span>
@@ -352,35 +374,45 @@
       }).join("");
       div.innerHTML = rows;
     }
-
     if (job.status === "done" || job.status === "error") {
       if (pollTimer) clearInterval(pollTimer);
       pollTimer = null;
     }
   }
-
   async function openLog(jobId, rowIndex) {
     const r = await fetch(`/api/jobs/${jobId}/row/${rowIndex}/log`);
     const txt = await r.text();
-
     const w = window.open("", "_blank");
     w.document.write(`<pre style="white-space:pre-wrap; font-family: ui-monospace, monospace; background: #f8f9fa; padding: 20px;">${txt.replace(/</g,"&lt;")}</pre>`);
     w.document.title = `Log de Job ${jobId} - Fila ${rowIndex}`;
   }
-
   $("btnRun").addEventListener("click", async () => {
-    const file = $("excel").files[0];
-    if (!file) return alert("Por favor, sube un archivo Excel primero.");
-
+    if (!$("permisosFile").value) return alert("Por favor, selecciona un template de permisos.");
+    const data = [];
+    const headers = ['NEW_USER_SUCURSAL', 'NEW_USER_CODE', 'NEW_USER_NAME', 'NEW_USER_EMAIL', 'NEW_USER_PASS', 'NEW_USER_TIPO', 'NEW_USER_COUNTER_ROL'];
+    $("dataTable").querySelectorAll('tbody tr').forEach(tr => {
+      const row = [];
+      headers.forEach((h, i) => {
+        const td = tr.children[i];
+        const select = td.querySelector('select');
+        const input = td.querySelector('input');
+        row.push(select ? select.value : (input ? input.value : ''));
+      });
+      data.push(row);
+    });
+    if (data.length === 0) return alert("Agrega al menos una fila de data.");
+    const workbook = XLSX.utils.book_new();
+    const sheet = XLSX.utils.aoa_to_sheet([headers, ...data]);
+    XLSX.utils.book_append_sheet(workbook, sheet, "Sheet1");
+    const wbout = XLSX.write(workbook, {bookType: 'xlsx', type: 'binary'});
+    const blob = new Blob([s2ab(wbout)], {type: "application/octet-stream"});
     const fd = new FormData();
-    fd.append("excel", file);
+    fd.append("excel", blob, "data.xlsx");
     fd.append("permisosFile", $("permisosFile").value);
     fd.append("autoCreate", $("autoCreate").checked ? "true" : "false");
     fd.append("headless", $("headless").checked ? "true" : "false");
-
     $("btnRun").innerHTML = '<i class="fas fa-spinner icon-spin me-2"></i>Iniciando...';
     $("btnRun").disabled = true;
-
     const r = await fetch("/api/jobs", { method: "POST", body: fd });
     const j = await r.json().catch(() => ({}));
     if (!j.ok) {
@@ -389,38 +421,31 @@
       $("btnRun").disabled = false;
       return;
     }
-
     currentJobId = j.jobId;
     await showJob(currentJobId);
-
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(() => showJob(currentJobId), 2000);
-
     $("btnRun").innerHTML = '<i class="fas fa-rocket me-2"></i>Iniciar Job';
     $("btnRun").disabled = false;
   });
-
   // CRUD templates
   const editorModal = new bootstrap.Modal(document.getElementById("editorModal"));
   const newModal = new bootstrap.Modal(document.getElementById("newModal"));
-
   async function refreshTplList() {
     await loadPermisosTemplatesInto("tplList");
     await loadPermisosTemplatesInto("permisosFile");
     $("tplView").innerHTML = '<p class="text-muted text-center">Selecciona un template para ver su contenido.</p>';
   }
-
   $("btnReloadTemplates").addEventListener("click", async () => {
     $("btnReloadTemplates").innerHTML = '<i class="fas fa-sync-alt icon-spin me-1"></i>Refrescando...';
     await refreshTplList();
     $("btnReloadTemplates").innerHTML = '<i class="fas fa-sync-alt me-1"></i>Refrescar';
   });
-
   $("tplList").addEventListener("change", async () => {
     const f = $("tplList").value;
-    if (!f) { 
-      $("tplView").innerHTML = '<p class="text-muted text-center">Selecciona un template para ver su contenido.</p>'; 
-      return; 
+    if (!f) {
+      $("tplView").innerHTML = '<p class="text-muted text-center">Selecciona un template para ver su contenido.</p>';
+      return;
     }
     const r = await api(`/api/templates/permisos/${encodeURIComponent(f)}`);
     if (r.ok) {
@@ -435,7 +460,6 @@
       $("tplView").innerHTML = `<p class="text-danger text-center">${r.error || "Error al cargar el template"}</p>`;
     }
   });
-
   function addEditRow(tbody, title, activo, escritura) {
     const tr = document.createElement('tr');
     tr.innerHTML = `
@@ -445,7 +469,6 @@
     `;
     tbody.appendChild(tr);
   }
-
   $("btnEdit").addEventListener("click", async () => {
     const f = $("tplList").value;
     if (!f) return alert("Por favor, selecciona un template primero.");
@@ -456,25 +479,16 @@
     const tbody = $("editTable").querySelector('tbody');
     tbody.innerHTML = '';
     r.data.forEach(item => addEditRow(tbody, item.title, item.activo, item.escritura));
+    $('editSelectAllActivo').checked = false;
+    $('editSelectAllEscritura').checked = false;
     editorModal.show();
   });
-
-  $("editSelectAllActivo").addEventListener("click", () => {
-    document.querySelectorAll('#editTable .activo').forEach(cb => cb.checked = true);
+  $("editSelectAllActivo").addEventListener("change", (e) => {
+    document.querySelectorAll('#editTable .activo').forEach(cb => cb.checked = e.target.checked);
   });
-
-  $("editDeselectAllActivo").addEventListener("click", () => {
-    document.querySelectorAll('#editTable .activo').forEach(cb => cb.checked = false);
+  $("editSelectAllEscritura").addEventListener("change", (e) => {
+    document.querySelectorAll('#editTable .escritura').forEach(cb => cb.checked = e.target.checked);
   });
-
-  $("editSelectAllEscritura").addEventListener("click", () => {
-    document.querySelectorAll('#editTable .escritura').forEach(cb => cb.checked = true);
-  });
-
-  $("editDeselectAllEscritura").addEventListener("click", () => {
-    document.querySelectorAll('#editTable .escritura').forEach(cb => cb.checked = false);
-  });
-
   $("btnSaveJson").addEventListener("click", async () => {
     const f = $("editFullFileName").value;
     const data = [];
@@ -500,7 +514,6 @@
     $("tplList").value = f;
     $("tplList").dispatchEvent(new Event("change"));
   });
-
   $("btnDelete").addEventListener("click", async () => {
     const f = $("tplList").value;
     if (!f) return alert("Por favor, selecciona un template primero.");
@@ -509,7 +522,6 @@
     if (!r.ok) return alert(r.error || "Error al eliminar el template");
     await refreshTplList();
   });
-
   function addNewRow(tbody, title, activo, escritura) {
     const tr = document.createElement('tr');
     tr.innerHTML = `
@@ -519,31 +531,21 @@
     `;
     tbody.appendChild(tr);
   }
-
   $("btnNewTemplate").addEventListener("click", () => {
     $("newName").value = "";
     const tbody = $("newTable").querySelector('tbody');
     tbody.innerHTML = '';
-    defaultPermissions.forEach(item => addNewRow(tbody, item.title, item.activo, item.escritura));
+    defaultPermissions.forEach(item => addNewRow(tbody, item.title, false, false));
+    $('newSelectAllActivo').checked = false;
+    $('newSelectAllEscritura').checked = false;
     newModal.show();
   });
-
-  $("newSelectAllActivo").addEventListener("click", () => {
-    document.querySelectorAll('#newTable .activo').forEach(cb => cb.checked = true);
+  $("newSelectAllActivo").addEventListener("change", (e) => {
+    document.querySelectorAll('#newTable .activo').forEach(cb => cb.checked = e.target.checked);
   });
-
-  $("newDeselectAllActivo").addEventListener("click", () => {
-    document.querySelectorAll('#newTable .activo').forEach(cb => cb.checked = false);
+  $("newSelectAllEscritura").addEventListener("change", (e) => {
+    document.querySelectorAll('#newTable .escritura').forEach(cb => cb.checked = e.target.checked);
   });
-
-  $("newSelectAllEscritura").addEventListener("click", () => {
-    document.querySelectorAll('#newTable .escritura').forEach(cb => cb.checked = true);
-  });
-
-  $("newDeselectAllEscritura").addEventListener("click", () => {
-    document.querySelectorAll('#newTable .escritura').forEach(cb => cb.checked = false);
-  });
-
   $("btnCreateTpl").addEventListener("click", async () => {
     const name = $("newName").value.trim();
     if (!name) return alert("Por favor, ingresa un nombre para el template.");
@@ -564,18 +566,145 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, data })
     });
-
     if (!r.ok) return alert(r.error || "Error al crear el template");
     newModal.hide();
     await refreshTplList();
     $("tplList").value = r.filename;
     $("tplList").dispatchEvent(new Event("change"));
   });
-
+  // Data table functionality
+  const headers = ['NEW_USER_SUCURSAL', 'NEW_USER_CODE', 'NEW_USER_NAME', 'NEW_USER_EMAIL', 'NEW_USER_PASS', 'NEW_USER_TIPO', 'NEW_USER_COUNTER_ROL'];
+  const TIPOS_USUARIO = ['BRANCH', 'COUNTER', 'ADMINISTRADOR'];
+  const ROLES_COUNTER = ['MOSTRADOR', 'CAJA', 'GERENTE', 'ALMACÉN / INVENTARIO'];
+  const SUCURSALES = ['ZONAL BOLOGNESI', 'PLANTA AREQUIPA'];
+  function addDataRow(values = new Array(headers.length).fill('')) {
+    const tbody = $("dataTable").querySelector('tbody');
+    const tr = document.createElement('tr');
+    // NEW_USER_SUCURSAL
+    const tdSucursal = document.createElement('td');
+    const selectSucursal = document.createElement('select');
+    selectSucursal.className = 'form-select';
+    selectSucursal.innerHTML = SUCURSALES.map(s => `<option value="${s}" ${s === values[0] ? 'selected' : ''}>${s}</option>`).join('');
+    tdSucursal.appendChild(selectSucursal);
+    // NEW_USER_CODE to NEW_USER_PASS
+    const tdCode = document.createElement('td');
+    const inputCode = document.createElement('input');
+    inputCode.type = 'text';
+    inputCode.className = 'form-control';
+    inputCode.value = values[1];
+    tdCode.appendChild(inputCode);
+    const tdName = document.createElement('td');
+    const inputName = document.createElement('input');
+    inputName.type = 'text';
+    inputName.className = 'form-control';
+    inputName.value = values[2];
+    tdName.appendChild(inputName);
+    const tdEmail = document.createElement('td');
+    const inputEmail = document.createElement('input');
+    inputEmail.type = 'text';
+    inputEmail.className = 'form-control';
+    inputEmail.value = values[3];
+    tdEmail.appendChild(inputEmail);
+    const tdPass = document.createElement('td');
+    const inputPass = document.createElement('input');
+    inputPass.type = 'text';
+    inputPass.className = 'form-control';
+    inputPass.value = values[4];
+    tdPass.appendChild(inputPass);
+    // NEW_USER_TIPO
+    const tdTipo = document.createElement('td');
+    const selectTipo = document.createElement('select');
+    selectTipo.className = 'form-select';
+    selectTipo.innerHTML = TIPOS_USUARIO.map(t => `<option value="${t}" ${t === values[5] ? 'selected' : ''}>${t}</option>`).join('');
+    tdTipo.appendChild(selectTipo);
+    // NEW_USER_COUNTER_ROL
+    const tdRol = document.createElement('td');
+    function updateRol() {
+      tdRol.innerHTML = '';
+      const tipo = selectTipo.value;
+      if (tipo === 'COUNTER' || tipo === 'ADMINISTRADOR') {
+        const selectRol = document.createElement('select');
+        selectRol.className = 'form-select';
+        selectRol.innerHTML = ROLES_COUNTER.map(r => `<option value="${r}" ${r === values[6] ? 'selected' : ''}>${r}</option>`).join('');
+        tdRol.appendChild(selectRol);
+      } else {
+        const span = document.createElement('span');
+        span.textContent = '';
+        tdRol.appendChild(span);
+      }
+    }
+    selectTipo.addEventListener('change', updateRol);
+    updateRol();
+    // Acciones
+    const tdAcciones = document.createElement('td');
+    const btnRemove = document.createElement('button');
+    btnRemove.className = 'btn btn-sm btn-danger btn-remove-row';
+    btnRemove.innerHTML = '<i class="fas fa-trash"></i>';
+    btnRemove.addEventListener('click', () => tr.remove());
+    tdAcciones.appendChild(btnRemove);
+    tr.appendChild(tdSucursal);
+    tr.appendChild(tdCode);
+    tr.appendChild(tdName);
+    tr.appendChild(tdEmail);
+    tr.appendChild(tdPass);
+    tr.appendChild(tdTipo);
+    tr.appendChild(tdRol);
+    tr.appendChild(tdAcciones);
+    tbody.appendChild(tr);
+  }
+  $("btnAddManualRow").addEventListener("click", () => addDataRow());
+  $("btnClearTable").addEventListener("click", () => {
+    if (confirm("¿Estás seguro de limpiar la tabla?")) {
+      $("dataTable").querySelector('tbody').innerHTML = '';
+      $("previewExcel").value = '';
+    }
+  });
+  // Carga automática al seleccionar el archivo
+  $("previewExcel").addEventListener("change", async () => {
+    const file = $("previewExcel").files[0];
+    if (!file) return;
+    const data = await file.arrayBuffer();
+    const workbook = XLSX.read(data, {type: "array"});
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const json = XLSX.utils.sheet_to_json(sheet, {header: 1});
+    const fileHeaders = json[0];
+    if (!arraysEqual(fileHeaders, headers)) return alert("Los headers del Excel no coinciden con los esperados.");
+    const tbody = $("dataTable").querySelector('tbody');
+    tbody.innerHTML = '';
+    json.slice(1).forEach(row => addDataRow(row));
+  });
+  function arraysEqual(a, b) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) return false;
+    }
+    return true;
+  }
+  // Cell edit modal
+  $('dataTable').addEventListener('dblclick', (e) => {
+    const input = e.target.closest('td')?.querySelector('input');
+    if (input) {
+      currentInput = input;
+      $('editCellText').value = input.value;
+      new bootstrap.Modal($('editCellModal')).show();
+    }
+  });
+  $("btnSaveCell").addEventListener("click", () => {
+    if (currentInput) {
+      currentInput.value = $('editCellText').value;
+    }
+    bootstrap.Modal.getInstance($('editCellModal')).hide();
+  });
   // init
   (async () => {
     await refreshTplList();
   })();
+  function s2ab(s) {
+    const buf = new ArrayBuffer(s.length);
+    const view = new Uint8Array(buf);
+    for (let i = 0; i < s.length; i++) view[i] = s.charCodeAt(i) & 0xFF;
+    return buf;
+  }
 </script>
 </body>
 </html>

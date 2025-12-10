@@ -1,33 +1,4 @@
 // scrape_html.js
-// --------------------------------------------------------------------------------------------
-// FIX REAL AUTOCOMPLETE (Sucursal):
-// - NO usamos TAB para "confirmar" (en tu UI TAB no selecciona, solo cambia foco).
-// - Estrategia nueva:
-//   1) Escribir query -> detectar popup -> elegir mejor opción -> MARK (data-autofill="pick")
-//      -> page.click('[data-autofill="pick"]') (click real del navegador) -> blur por JS -> validar
-//   2) Fallback: teclado determinístico (ArrowDown hasta índice exacto) + Enter (SIN TAB)
-//   3) Fallback: click por coordenadas (page.mouse) al centro del item
-// - Validación: ng-invalid / aria-invalid / feedback "escoge ... sucursal"
-//
-// ✅ NUEVO (ARREGLADO): Counter rol (solo cuando el tipo = COUNTER o ADMINISTRADOR)
-// - Lee NEW_USER_COUNTER_ROL (puede ser TEXTO visible p.ej. "CAJA" o VALUE interno p.ej. "cashRegister")
-// - YA NO usa un ID fijo (porque te estaba agarrando el SELECT equivocado).
-// - Detecta el SELECT correcto por el LABEL (contiene "rol"/"caja"/"counter") y EXCLUYE "Tipo de usuario".
-// - Si el tipo es COUNTER/ADMIN y NO aparece el select => ERROR (para que no se “pase”)
-// - Si el tipo NO es COUNTER/ADMIN y no aparece => lo ignora
-//
-// ✅ AGREGADO SIN TOCAR TU LÓGICA:
-// - MODO MASIVO por Excel (EXCEL_MASIVO=true, EXCEL_FILE=EXCEL/usuarios.xlsx)
-// - LOGS a archivo + consola filtrada (LOG_DIR, CONSOLE_LEVEL)
-// - Uso de CREATE_WAIT_MS (espera configurable tras crear)
-//
-// ✅ CAMBIO QUE TE PEDÍ (para WebApp / multiusuario):
-// - Aislamiento por corrida:
-//     * JOB_OUTPUT_DIR   => carpeta base del job (si viene, todo sale ahí)
-//     * PERMISOS_DIR     => override carpeta permisos_modulos
-//     * CAMPOS_DIR       => override carpeta permisos_campossap
-//     * HTML_DIR_NAME    => nombre de la carpeta HTML dentro del job (default "HTML")
-// --------------------------------------------------------------------------------------------
 
 require("dotenv").config();
 const fs = require("fs-extra");
@@ -71,11 +42,60 @@ function norm(s) {
 /* -------------------------------------------------------------------------- */
 
 const ROOT_CWD = process.cwd(); // raíz del proyecto
-const JOB_BASE_DIR = process.env.JOB_OUTPUT_DIR
-  ? path.resolve(process.env.JOB_OUTPUT_DIR) // aislado por job
-  : ROOT_CWD;
-
+const JOB_BASE_DIR = process.env.JOB_OUTPUT_DIR ? path.resolve(process.env.JOB_OUTPUT_DIR) : ROOT_CWD;
 const HTML_DIR_NAME = String(process.env.HTML_DIR_NAME || "HTML");
+
+/* -------------------------------------------------------------------------- */
+/* ✅ PATH RESOLVE ROBUSTO (FIX: usa webapp/permisos_campossap correctamente)  */
+/* -------------------------------------------------------------------------- */
+
+function cleanEnvPath(p) {
+  return String(p || "").trim().replace(/^["']|["']$/g, ""); // quita comillas
+}
+
+function resolveMaybeRelative(p, base = ROOT_CWD) {
+  const v = cleanEnvPath(p);
+  if (!v) return null;
+  return path.isAbsolute(v) ? v : path.resolve(base, v);
+}
+
+function chooseFirstExistingDir(candidates) {
+  for (const d of candidates) {
+    try {
+      if (d && fs.existsSync(d)) return d;
+    } catch {}
+  }
+  // si ninguno existe, devuelve el primero (se creará con ensureDir)
+  return candidates[0];
+}
+
+/**
+ * Resuelve un DIR:
+ * - Si viene env => respeta (absoluto o relativo a ROOT_CWD)
+ * - Si no => usa default (prioriza webapp si existe)
+ */
+function resolveDir(envKey, defaultCandidates) {
+  const fromEnv = resolveMaybeRelative(process.env[envKey], ROOT_CWD);
+  if (fromEnv) return fromEnv;
+  return chooseFirstExistingDir(defaultCandidates);
+}
+
+/**
+ * Resuelve un FILE PATH:
+ * - Si envFile tiene separadores (/, \) => lo trata como ruta y respeta (relativa a ROOT_CWD o absoluta)
+ * - Si envFile es solo nombre => lo une con dirBase
+ * - Si no hay envFile => usa fallbackName en dirBase
+ */
+function resolveFilePath(envFile, dirBase, fallbackName) {
+  const raw = cleanEnvPath(envFile);
+  if (!raw) return path.join(dirBase, fallbackName);
+
+  const looksLikePath = raw.includes("/") || raw.includes("\\");
+  if (looksLikePath) {
+    return resolveMaybeRelative(raw, ROOT_CWD);
+  }
+  return path.join(dirBase, path.basename(raw));
+}
 
 /* -------------------------------------------------------------------------- */
 /* ✅ LOGGING (archivo + consola filtrada)                                     */
@@ -101,7 +121,6 @@ const ORIG_CONSOLE = {
 
 function redactSecrets(text) {
   const s = String(text ?? "");
-  // Redacción simple: si por algún motivo se imprimen credenciales
   return s
     .replace(/(LOGIN_PASS\s*=\s*)(.+)/gi, "$1***")
     .replace(/(NEW_USER_PASS\s*=\s*)(.+)/gi, "$1***")
@@ -268,7 +287,7 @@ async function clickByText(page, text, { timeout = 30000 } = {}) {
  */
 async function snapshot(page, outDir, prefix, { maxWidth = 2400 } = {}) {
   const stamp = ts();
-  await fs.ensureDir(outDir); // ✅ aseguramos carpeta
+  await fs.ensureDir(outDir);
 
   try {
     await page.evaluate(() => {
@@ -306,7 +325,6 @@ async function snapshot(page, outDir, prefix, { maxWidth = 2400 } = {}) {
   await fs.writeFile(htmlPath, html, "utf8");
   await page.screenshot({ path: pngPath, fullPage: true });
 
-  // ✅ para que se vea en consola con CONSOLE_LEVEL=important
   important(`📌 Snapshot: ${prefix}`, { html: htmlPath, png: pngPath });
 }
 
@@ -620,13 +638,16 @@ async function selectCounterRolIfPresent(page, tipoRes, { timeout = 12000 } = {}
         .map((o) => norm2(o.textContent))
         .join(" ");
 
-      const looksTipo = optsTextJoined.includes("branch") && optsTextJoined.includes("counter") && optsTextJoined.includes("admin");
+      const looksTipo =
+        optsTextJoined.includes("branch") && optsTextJoined.includes("counter") && optsTextJoined.includes("admin");
       let score =
         (lab.includes("rol") ? 5 : 0) +
         (lab.includes("caja") ? 5 : 0) +
         (lab.includes("counter") ? 4 : 0) +
-        ((id.includes("rol") || name.includes("rol")) ? 3 : 0) +
-        ((id.includes("cash") || name.includes("cash") || id.includes("register") || name.includes("register")) ? 3 : 0) +
+        (id.includes("rol") || name.includes("rol") ? 3 : 0) +
+        (id.includes("cash") || name.includes("cash") || id.includes("register") || name.includes("register")
+          ? 3
+          : 0) +
         (looksTipo ? -100 : 0);
 
       candidates.push({
@@ -1334,16 +1355,183 @@ async function fillCreateUserFromEnv(page) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* FIX: CLICK GUARDAR MÁS RÁPIDO                                               */
+/* ✅ NUEVO FIX REAL CAMPOS: activar tab por CONTENEDOR (NO POR TEXTO)         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Espera a que un contenedor de CAMPOS esté visible y tenga checkboxes show_/edit_.
+ * ✅ Scopado al modal #adminUsersModal (evita falsos positivos).
+ */
+async function waitCamposContainerReady(page, containerSelector, { timeout = 25000, minCheckboxes = 2 } = {}) {
+  await waitAdminUsersModalOpen(page, { timeout: Math.min(timeout, 25000) });
+
+  await page.waitForFunction(
+    ({ containerSelector, minCheckboxes }) => {
+      const modal = document.querySelector("#adminUsersModal.show") || document.querySelector("#adminUsersModal");
+      const el = (modal && modal.querySelector(containerSelector)) || document.querySelector(containerSelector);
+      if (!el) return false;
+
+      const st = window.getComputedStyle(el);
+      const r = el.getBoundingClientRect();
+      const visible =
+        r.width > 5 && r.height > 5 && st.display !== "none" && st.visibility !== "hidden" && st.opacity !== "0";
+
+      const cbs = el.querySelectorAll(
+        'input[type="checkbox"][name^="show_"], input[type="checkbox"][name^="edit_"]'
+      );
+
+      return visible && cbs.length >= minCheckboxes;
+    },
+    { timeout },
+    { containerSelector, minCheckboxes }
+  );
+}
+
+/**
+ * Activa el TAB que contiene el containerSelector, sin depender del texto del tab.
+ * - Busca el "pane" padre (.tab-pane / [role=tabpanel]) del container
+ * - Clickea el link que apunta a ese pane (href="#id" / data-target / data-bs-target)
+ * - Luego espera container ready
+ */
+async function activateTabForContainer(page, containerSelector, { timeout = 30000, minCheckboxes = 2 } = {}) {
+  await waitAdminUsersModalOpen(page, { timeout: Math.min(timeout, 25000) });
+
+  const info = await page.evaluate((containerSelector) => {
+    const modal = document.querySelector("#adminUsersModal.show") || document.querySelector("#adminUsersModal");
+    if (!modal) return { ok: false, reason: "No existe #adminUsersModal" };
+
+    const container = modal.querySelector(containerSelector);
+    if (!container) return { ok: false, reason: `No existe container dentro del modal: ${containerSelector}` };
+
+    const pane = container.closest(".tab-pane,[role='tabpanel']");
+    if (!pane) {
+      // No está dentro de tabs => igual ok, no hay que activar nada
+      return { ok: true, clicked: false, paneId: null, note: "Container no está dentro de tab-pane" };
+    }
+
+    const paneId = pane.getAttribute("id");
+    if (!paneId) {
+      // tab-pane sin id => no se puede mapear a link, pero puede estar visible
+      return { ok: true, clicked: false, paneId: null, note: "tab-pane sin id" };
+    }
+
+    const isActive = pane.classList.contains("active") || pane.classList.contains("show");
+    if (isActive) return { ok: true, clicked: false, paneId, note: "Pane ya activo" };
+
+    const sel = `a[href="#${CSS.escape(paneId)}"], a[data-toggle="tab"][href="#${CSS.escape(
+      paneId
+    )}"], a[role="tab"][href="#${CSS.escape(paneId)}"], a[data-target="#${CSS.escape(
+      paneId
+    )}"], a[data-bs-target="#${CSS.escape(paneId)}"]`;
+
+    const link = modal.querySelector(sel);
+    if (!link) {
+      // fallback global (por si el nav está fuera del modal)
+      const link2 = document.querySelector(sel);
+      if (!link2) return { ok: false, reason: `No se encontró link de TAB para pane #${paneId}` };
+      link2.scrollIntoView({ block: "center", inline: "center" });
+      try {
+        link2.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+        link2.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+        link2.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+        link2.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        link2.click();
+      } catch {}
+      return { ok: true, clicked: true, paneId, note: "Click en link global" };
+    }
+
+    link.scrollIntoView({ block: "center", inline: "center" });
+    try {
+      link.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      link.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      link.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      link.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      link.click();
+    } catch {}
+
+    return { ok: true, clicked: true, paneId, note: "Click en link dentro modal" };
+  }, containerSelector);
+
+  if (!info.ok) throw new Error(info.reason || "No se pudo activar tab por contenedor");
+
+  if (info.clicked) await sleep(450);
+
+  await waitCamposContainerReady(page, containerSelector, { timeout, minCheckboxes });
+}
+
+/* -------------------------------------------------------------------------- */
+/* ✅ TABS SCOPED AL MODAL (fallback por texto)                                */
+/* -------------------------------------------------------------------------- */
+
+async function activateTabInAdminModalByText(page, tabText, { timeout = 15000 } = {}) {
+  const wanted = norm(tabText);
+
+  // Espera que el modal esté abierto
+  await waitAdminUsersModalOpen(page, { timeout: Math.min(timeout, 25000) });
+
+  const found = await page.evaluate((wanted) => {
+    const modal = document.querySelector("#adminUsersModal.show");
+    if (!modal) return false;
+
+    const norm2 = (s) =>
+      String(s || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+
+    const links = Array.from(modal.querySelectorAll("a.nav-link, a[data-toggle='tab'], a[role='tab']"));
+    return links.some((a) => norm2(a.innerText || a.textContent).includes(wanted));
+  }, wanted);
+
+  if (!found) {
+    // fallback a tu función global (por si la UI no usa nav-link dentro modal)
+    await activateTabByText(page, tabText, { timeout });
+    return;
+  }
+
+  await page.evaluate((wanted) => {
+    const modal = document.querySelector("#adminUsersModal.show");
+    if (!modal) throw new Error("No hay #adminUsersModal.show");
+
+    const norm2 = (s) =>
+      String(s || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+
+    const links = Array.from(modal.querySelectorAll("a.nav-link, a[data-toggle='tab'], a[role='tab']"));
+    const a = links.find((x) => norm2(x.innerText || x.textContent).includes(wanted));
+    if (!a) throw new Error("No se encontró tab en modal: " + wanted);
+
+    a.scrollIntoView({ block: "center", inline: "center" });
+    a.click();
+  }, wanted);
+
+  await sleep(450);
+}
+
+/* -------------------------------------------------------------------------- */
+/* FIX: CLICK GUARDAR MÁS RÁPIDO (MEJORADO PARA CAMPOS)                        */
 /* -------------------------------------------------------------------------- */
 
 async function clickButtonInContainerByText(page, containerSelector, textWanted, { timeout = 12000 } = {}) {
-  const wanted = norm(textWanted);
+  return await clickButtonInContainerByAnyText(page, containerSelector, [textWanted], { timeout });
+}
+
+async function clickButtonInContainerByAnyText(page, containerSelector, textsWanted, { timeout = 12000 } = {}) {
+  const wantedArr = (Array.isArray(textsWanted) ? textsWanted : [textsWanted]).map(norm).filter(Boolean);
+  if (!wantedArr.length) throw new Error("textsWanted vacío");
+
   const started = Date.now();
 
   while (Date.now() - started < timeout) {
-    const res = await page.evaluate(({ containerSelector, wanted }) => {
-      const container = document.querySelector(containerSelector);
+    const res = await page.evaluate(({ containerSelector, wantedArr }) => {
+      const modal = document.querySelector("#adminUsersModal.show") || document.querySelector("#adminUsersModal");
+      const container = (modal && modal.querySelector(containerSelector)) || document.querySelector(containerSelector);
       if (!container) return { ok: false, reason: "No existe container" };
 
       const norm2 = (s) =>
@@ -1354,23 +1542,141 @@ async function clickButtonInContainerByText(page, containerSelector, textWanted,
           .trim()
           .toLowerCase();
 
-      const btn = Array.from(container.querySelectorAll("button")).find((b) => norm2(b.textContent).includes(wanted));
-      if (!btn) return { ok: false, reason: "No existe botón aún" };
+      const isDisabled = (el) => {
+        if (!el) return true;
+        const aria = el.getAttribute && el.getAttribute("aria-disabled");
+        const cls = (el.className || "").toString();
+        return !!el.disabled || aria === "true" || cls.includes("disabled");
+      };
 
-      btn.scrollIntoView({ block: "center", inline: "center" });
-      btn.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
-      btn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-      btn.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-      btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      const getText = (el) => {
+        if (!el) return "";
+        if (el.tagName === "INPUT") return el.value || el.getAttribute("value") || "";
+        return el.innerText || el.textContent || "";
+      };
 
-      return { ok: true };
-    }, { containerSelector, wanted });
+      const candidates = Array.from(
+        container.querySelectorAll("button, a, [role='button'], input[type='button'], input[type='submit']")
+      );
 
-    if (res.ok) return;
-    await sleep(200);
+      let picked = null;
+
+      for (const w of wantedArr) {
+        picked = candidates.find((b) => norm2(getText(b)).includes(w) && !isDisabled(b));
+        if (picked) break;
+      }
+
+      if (!picked) {
+        for (const w of wantedArr) {
+          const any = candidates.find((b) => norm2(getText(b)).includes(w));
+          if (any) {
+            return { ok: false, reason: "Botón encontrado pero está deshabilitado", foundText: getText(any) };
+          }
+        }
+        return { ok: false, reason: "No existe botón aún" };
+      }
+
+      picked.scrollIntoView({ block: "center", inline: "center" });
+
+      picked.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      picked.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      picked.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      picked.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      try {
+        picked.click();
+      } catch {}
+
+      return { ok: true, clickedText: getText(picked) };
+    }, { containerSelector, wantedArr });
+
+    if (res.ok) {
+      console.log(`✅ Click botón OK en ${containerSelector}: "${res.clickedText}"`);
+      return;
+    }
+
+    if (res.reason && res.reason.includes("deshabilitado")) {
+      console.log(`⚠️ Botón encontrado pero deshabilitado en ${containerSelector}: "${res.foundText || ""}"`);
+    }
+
+    await sleep(220);
   }
 
-  throw new Error(`No se pudo click ${textWanted} dentro de ${containerSelector} (timeout corto).`);
+  // fallback global dentro del modal: a veces el botón queda fuera del contenedor
+  console.log(`⚠️ No se pudo click dentro de ${containerSelector}. Intento fallback en #adminUsersModal...`);
+  await clickButtonInModalByAnyText(page, "#adminUsersModal", textsWanted, { timeout: Math.min(9000, timeout) });
+}
+
+async function clickButtonInModalByAnyText(page, modalSelector, textsWanted, { timeout = 9000 } = {}) {
+  const wantedArr = (Array.isArray(textsWanted) ? textsWanted : [textsWanted]).map(norm).filter(Boolean);
+  if (!wantedArr.length) throw new Error("textsWanted vacío");
+
+  const started = Date.now();
+  while (Date.now() - started < timeout) {
+    const res = await page.evaluate(({ modalSelector, wantedArr }) => {
+      const modal = document.querySelector(modalSelector);
+      if (!modal) return { ok: false, reason: "No existe modal" };
+
+      const norm2 = (s) =>
+        String(s || "")
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .toLowerCase();
+
+      const isVisible = (el) => {
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        const st = window.getComputedStyle(el);
+        return r.width > 0 && r.height > 0 && st.display !== "none" && st.visibility !== "hidden";
+      };
+
+      const isDisabled = (el) => {
+        if (!el) return true;
+        const aria = el.getAttribute && el.getAttribute("aria-disabled");
+        const cls = (el.className || "").toString();
+        return !!el.disabled || aria === "true" || cls.includes("disabled");
+      };
+
+      const getText = (el) => {
+        if (!el) return "";
+        if (el.tagName === "INPUT") return el.value || el.getAttribute("value") || "";
+        return el.innerText || el.textContent || "";
+      };
+
+      const candidates = Array.from(
+        modal.querySelectorAll("button, a, [role='button'], input[type='button'], input[type='submit']")
+      ).filter(isVisible);
+
+      let picked = null;
+      for (const w of wantedArr) {
+        picked = candidates.find((b) => norm2(getText(b)).includes(w) && !isDisabled(b));
+        if (picked) break;
+      }
+      if (!picked) return { ok: false, reason: "No encontrado aún" };
+
+      picked.scrollIntoView({ block: "center", inline: "center" });
+      picked.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      picked.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      picked.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      picked.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      try {
+        picked.click();
+      } catch {}
+
+      return { ok: true, clickedText: getText(picked) };
+    }, { modalSelector, wantedArr });
+
+    if (res.ok) {
+      console.log(`✅ Click fallback modal OK: "${res.clickedText}"`);
+      return;
+    }
+
+    await sleep(240);
+  }
+
+  throw new Error(`No se pudo clickear ningún botón con textos=${JSON.stringify(textsWanted)} en modal ${modalSelector}`);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1572,14 +1878,21 @@ async function applyModulesTemplate(page, templateObj) {
 
     const setCheckbox = (cb, wanted) => {
       if (!cb || typeof wanted !== "boolean") return;
-      const current = !!cb.checked;
-      if (current === wanted) return;
+      if (!!cb.checked === wanted) return;
 
       cb.scrollIntoView({ block: "center", inline: "center" });
-      cb.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
-      cb.click();
+
+      // intento click
+      try { cb.click(); } catch {}
       cb.dispatchEvent(new Event("change", { bubbles: true }));
       cb.dispatchEvent(new Event("input", { bubbles: true }));
+
+      // fallback programático
+      if (!!cb.checked !== wanted) {
+        cb.checked = wanted;
+        cb.dispatchEvent(new Event("input", { bubbles: true }));
+        cb.dispatchEvent(new Event("change", { bubbles: true }));
+      }
     };
 
     for (const [title, conf] of Object.entries(templateObj || {})) {
@@ -1618,6 +1931,7 @@ async function clickGuardarModulesModal(page, { timeout = 12000 } = {}) {
       btn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
       btn.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
       btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      try { btn.click(); } catch {}
       return { ok: true };
     });
 
@@ -1633,7 +1947,7 @@ async function clickGuardarModulesModal(page, { timeout = 12000 } = {}) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* TABS                                                                        */
+/* TABS (GLOBAL - fallback)                                                   */
 /* -------------------------------------------------------------------------- */
 
 async function activateTabByText(page, tabText, { timeout = 15000 } = {}) {
@@ -1682,7 +1996,8 @@ async function activateTabByText(page, tabText, { timeout = 15000 } = {}) {
 
 async function extractCamposSAPGeneric(page, containerSelector) {
   return await page.evaluate((containerSelector) => {
-    const container = document.querySelector(containerSelector);
+    const modal = document.querySelector("#adminUsersModal.show") || document.querySelector("#adminUsersModal");
+    const container = (modal && modal.querySelector(containerSelector)) || document.querySelector(containerSelector);
     if (!container) throw new Error(`No existe ${containerSelector}`);
 
     const clean = (s) => String(s || "").replace(/\s+/g, " ").trim();
@@ -1775,19 +2090,48 @@ function normalizeCamposTemplateToObject(templateAny) {
 
 async function applyCamposTemplateGeneric(page, containerSelector, templateObj) {
   return await page.evaluate((containerSelector, templateObj) => {
-    const container = document.querySelector(containerSelector);
+    const modal = document.querySelector("#adminUsersModal.show") || document.querySelector("#adminUsersModal");
+    const container = (modal && modal.querySelector(containerSelector)) || document.querySelector(containerSelector);
     if (!container) throw new Error(`No existe ${containerSelector}`);
+
+    const isDisabled = (el) => {
+      if (!el) return true;
+      const aria = el.getAttribute && el.getAttribute("aria-disabled");
+      const cls = (el.className || "").toString();
+      return !!el.disabled || aria === "true" || cls.includes("disabled");
+    };
 
     const setCheckbox = (cb, wanted) => {
       if (!cb || typeof wanted !== "boolean") return;
+      if (isDisabled(cb)) return;
+
       const current = !!cb.checked;
       if (current === wanted) return;
 
       cb.scrollIntoView({ block: "center", inline: "center" });
-      cb.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
-      cb.click();
+
+      // 1) click normal
+      try { cb.click(); } catch {}
       cb.dispatchEvent(new Event("change", { bubbles: true }));
       cb.dispatchEvent(new Event("input", { bubbles: true }));
+
+      // 2) si no quedó, set programático + eventos
+      if (!!cb.checked !== wanted) {
+        cb.checked = wanted;
+        cb.dispatchEvent(new Event("input", { bubbles: true }));
+        cb.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+
+      // 3) último fallback: click en label asociado
+      if (!!cb.checked !== wanted) {
+        const id = cb.getAttribute("id");
+        let lab = null;
+        if (id) lab = container.querySelector(`label[for="${CSS.escape(id)}"]`);
+        if (!lab) lab = cb.closest("label") || cb.parentElement;
+        try { lab && lab.click && lab.click(); } catch {}
+        cb.dispatchEvent(new Event("input", { bubbles: true }));
+        cb.dispatchEvent(new Event("change", { bubbles: true }));
+      }
     };
 
     const inputs = Array.from(
@@ -1810,7 +2154,7 @@ async function applyCamposTemplateGeneric(page, containerSelector, templateObj) 
       if (isEdit) row.editCb = cb;
     }
 
-    const logs = { touched: 0, notFound: [] };
+    const logs = { touched: 0, notFound: [], totalCheckboxes: inputs.length };
 
     for (const [code, conf] of Object.entries(templateObj || {})) {
       const row = byCode.get(code);
@@ -1825,6 +2169,22 @@ async function applyCamposTemplateGeneric(page, containerSelector, templateObj) 
 
     return logs;
   }, containerSelector, templateObj);
+}
+
+/* -------------------------------------------------------------------------- */
+/* ✅ UTIL: Abrir modal "Crear usuario" (para masivo)                          */
+/* -------------------------------------------------------------------------- */
+
+async function openCrearUsuarioModal(page) {
+  const crearBtnSel = "button.btn.btn-outline-secondary.btn-timbra-one.mr-sm-3";
+  try {
+    await page.waitForSelector(crearBtnSel, { timeout: 15000 });
+    await page.click(crearBtnSel);
+  } catch {
+    await clickByText(page, "Crear usuario", { timeout: 20000 });
+  }
+  await sleep(900);
+  await waitAdminUsersModalOpen(page, { timeout: 25000 });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1860,6 +2220,7 @@ async function clickCrearUsuarioSiCorresponde(page) {
     btn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     btn.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
     btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    try { btn.click(); } catch {}
   });
 
   console.log("✅ Click en 'Crear' realizado (AUTO_CREATE=true).");
@@ -1867,31 +2228,10 @@ async function clickCrearUsuarioSiCorresponde(page) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* ✅ UTIL: Abrir modal "Crear usuario" (para masivo)                          */
-/* -------------------------------------------------------------------------- */
-
-async function openCrearUsuarioModal(page) {
-  const crearBtnSel = 'button.btn.btn-outline-secondary.btn-timbra-one.mr-sm-3';
-  try {
-    await page.waitForSelector(crearBtnSel, { timeout: 15000 });
-    await page.click(crearBtnSel);
-  } catch {
-    await clickByText(page, "Crear usuario", { timeout: 20000 });
-  }
-  await sleep(900);
-  await waitAdminUsersModalOpen(page, { timeout: 25000 });
-}
-
-/* -------------------------------------------------------------------------- */
 /* ✅ BLOQUE COMPLETO para procesar 1 usuario                                  */
 /* -------------------------------------------------------------------------- */
 
-async function processOneUserFlow(page, {
-  outDir,
-  permisosPath,
-  camposPath,
-  AUTO_SAVE_CAMPOS,
-} = {}) {
+async function processOneUserFlow(page, { outDir, permisosPath, camposPath, AUTO_SAVE_CAMPOS } = {}) {
   // 1) Abrir modal Crear usuario
   await openCrearUsuarioModal(page);
   await snapshot(page, outDir, "crearUsuario");
@@ -1942,14 +2282,14 @@ async function processOneUserFlow(page, {
   }
 
   // ----------------------
-  // ✅ CAMPOS SAP + DATOS ARTÍCULOS + GUARDAR
+  // ✅ CAMPOS SAP + DATOS ARTÍCULOS + GUARDAR (FIX REAL: por contenedor)
   // ----------------------
   try {
+    // ✅ NO dependemos del texto "Campos SAP" / "Datos de artículos"
+    await activateTabForContainer(page, "#ModulosSociosDeNegocios", { timeout: 30000, minCheckboxes: 2 });
     const bpCatalog = await extractCamposSAPGeneric(page, "#ModulosSociosDeNegocios");
 
-    try {
-      await activateTabByText(page, "Datos de artículos");
-    } catch {}
+    await activateTabForContainer(page, "#ModulosArticulos", { timeout: 30000, minCheckboxes: 2 });
     const artCatalog = await extractCamposSAPGeneric(page, "#ModulosArticulos");
 
     const camposCatalog = [...bpCatalog, ...artCatalog];
@@ -1977,34 +2317,43 @@ async function processOneUserFlow(page, {
       const rawCampos = await fs.readJson(camposPath);
       const templateObj = normalizeCamposTemplateToObject(rawCampos);
 
+      // ✅ aplicar en Socios
+      await activateTabForContainer(page, "#ModulosSociosDeNegocios", { timeout: 30000, minCheckboxes: 2 });
       const logsBP = await applyCamposTemplateGeneric(page, "#ModulosSociosDeNegocios", templateObj);
-      console.log(`🧩 CAMPOS SOCIOS aplicados. Filas tocadas: ${logsBP.touched}`);
+      console.log(`🧩 CAMPOS SOCIOS aplicados. Filas tocadas: ${logsBP.touched} | checkboxes=${logsBP.totalCheckboxes}`);
+      if (logsBP.notFound?.length) console.log(`⚠️ SOCIOS notFound: ${logsBP.notFound.slice(0, 15).join(", ")}...`);
 
-      try {
-        await activateTabByText(page, "Datos de artículos");
-      } catch {}
+      // ✅ aplicar en Artículos
+      await activateTabForContainer(page, "#ModulosArticulos", { timeout: 30000, minCheckboxes: 2 });
       const logsART = await applyCamposTemplateGeneric(page, "#ModulosArticulos", templateObj);
-      console.log(`🧩 DATOS ARTÍCULOS aplicados. Filas tocadas: ${logsART.touched}`);
+      console.log(
+        `🧩 DATOS ARTÍCULOS aplicados. Filas tocadas: ${logsART.touched} | checkboxes=${logsART.totalCheckboxes}`
+      );
+      if (logsART.notFound?.length) console.log(`⚠️ ARTICULOS notFound: ${logsART.notFound.slice(0, 15).join(", ")}...`);
 
       await sleep(250);
       await snapshot(page, outDir, "campos_aplicado_todos");
 
       if (AUTO_SAVE_CAMPOS) {
-        try {
-          await activateTabByText(page, "Campos SAP");
-        } catch {}
-        await clickButtonInContainerByText(page, "#ModulosSociosDeNegocios", "GUARDAR CAMPOS S. DE NEGOCIOS", {
-          timeout: 12000,
-        });
+        // ✅ Guardar Socios
+        await activateTabForContainer(page, "#ModulosSociosDeNegocios", { timeout: 30000, minCheckboxes: 2 });
+        await clickButtonInContainerByAnyText(
+          page,
+          "#ModulosSociosDeNegocios",
+          ["GUARDAR CAMPOS S. DE NEGOCIOS", "GUARDAR CAMPOS SOCIOS DE NEGOCIOS", "GUARDAR CAMPOS SOCIOS", "GUARDAR CAMPOS"],
+          { timeout: 15000 }
+        );
         await sleep(Number(process.env.SAVE_WAIT_MS || 600));
         await snapshot(page, outDir, "guardar_campos_socios");
 
-        try {
-          await activateTabByText(page, "Datos de artículos");
-        } catch {}
-        await clickButtonInContainerByText(page, "#ModulosArticulos", "GUARDAR DATOS DE ARTÍCULOS", {
-          timeout: 12000,
-        });
+        // ✅ Guardar Artículos
+        await activateTabForContainer(page, "#ModulosArticulos", { timeout: 30000, minCheckboxes: 2 });
+        await clickButtonInContainerByAnyText(
+          page,
+          "#ModulosArticulos",
+          ["GUARDAR DATOS DE ARTÍCULOS", "GUARDAR DATOS DE ARTICULOS", "GUARDAR ARTÍCULOS", "GUARDAR ARTICULOS"],
+          { timeout: 15000 }
+        );
         await sleep(Number(process.env.SAVE_WAIT_MS || 600));
         await snapshot(page, outDir, "guardar_datos_articulos");
       } else {
@@ -2013,6 +2362,7 @@ async function processOneUserFlow(page, {
     }
   } catch (e) {
     console.log("⚠️ No se pudo procesar CAMPOS (Socios/Artículos):", e.message || e);
+    try { await snapshot(page, outDir, "campos_ERROR"); } catch {}
   }
 
   // ----------------------
@@ -2051,33 +2401,45 @@ async function processOneUserFlow(page, {
   const VIEWPORT_HEIGHT = parseInt(process.env.VIEWPORT_HEIGHT || "864", 10);
   const DEVICE_SCALE_FACTOR = parseFloat(process.env.DEVICE_SCALE_FACTOR || "1");
 
-  // ✅ CAMBIO PEDIDO: PERMISOS_DIR / CAMPOS_DIR por ENV (si vienen) o default a raíz del proyecto
-  const PERMISOS_DIR = path.resolve(process.env.PERMISOS_DIR || path.join(ROOT_CWD, "permisos_modulos"));
-  const envFile = (process.env.PERMISOS_FILE || "").trim();
-  const permisosFileName = envFile || "branch.json";
-  const permisosPath = path.join(PERMISOS_DIR, path.basename(permisosFileName));
+  // ✅ FIX DEFINITIVO: directorios con prioridad a /webapp si existe
+  const PERMISOS_DIR = resolveDir("PERMISOS_DIR", [
+    path.join(ROOT_CWD, "permisos_modulos"),
+    path.join(ROOT_CWD, "webapp", "permisos_modulos"),
+  ]);
 
-  const CAMPOS_DIR = path.resolve(process.env.CAMPOS_DIR || path.join(ROOT_CWD, "permisos_campossap"));
-  const camposEnvFile = (process.env.CAMPOS_FILE || "").trim();
-  const camposFileName = camposEnvFile || "branch.json";
-  const camposPath = path.join(CAMPOS_DIR, path.basename(camposFileName));
+  const CAMPOS_DIR = resolveDir("CAMPOS_DIR", [
+    path.join(ROOT_CWD, "webapp", "permisos_campossap"),
+    path.join(ROOT_CWD, "permisos_campossap"),
+  ]);
+
+  // ✅ FIX DEFINITIVO: archivos pueden ser nombre o ruta completa
+  const permisosPath = resolveFilePath(process.env.PERMISOS_FILE, PERMISOS_DIR, "branch.json");
+  const camposPath = resolveFilePath(process.env.CAMPOS_FILE, CAMPOS_DIR, "branch.json");
 
   if (!USER || !PASS) throw new Error("Faltan LOGIN_USER o LOGIN_PASS en tu .env");
 
   // ✅ CAMBIO PEDIDO: salida aislada por JOB_OUTPUT_DIR
-  // - Si JOB_OUTPUT_DIR existe => outDir = <JOB_OUTPUT_DIR>/<HTML_DIR_NAME>
-  // - Si NO existe => outDir = <proyecto>/HTML/run_<RUN_ID>
   const IS_JOB_MODE = !!process.env.JOB_OUTPUT_DIR;
   const OUT_ROOT = path.join(JOB_BASE_DIR, HTML_DIR_NAME);
   const outDir = IS_JOB_MODE ? OUT_ROOT : path.join(OUT_ROOT, `run_${RUN_ID}`);
 
   await fs.ensureDir(OUT_ROOT);
   await fs.ensureDir(outDir);
-  await fs.ensureDir(PERMISOS_DIR);
-  await fs.ensureDir(CAMPOS_DIR);
+
+  // ✅ IMPORTANTE: crea SOLO los directorios necesarios (en base al FILE real)
+  await fs.ensureDir(path.dirname(permisosPath));
+  await fs.ensureDir(path.dirname(camposPath));
 
   console.log("📁 Ruta módulos :", permisosPath);
   console.log("📁 Ruta campos  :", camposPath);
+
+  if (!fs.existsSync(camposPath)) {
+    console.warn("⚠️ OJO: NO existe la plantilla CAMPOS en esa ruta. Si existe en webapp/, revisa CAMPOS_DIR/CAMPOS_FILE.");
+  }
+  if (!fs.existsSync(permisosPath)) {
+    console.warn("⚠️ OJO: NO existe la plantilla MÓDULOS en esa ruta. Si existe en webapp/, revisa PERMISOS_DIR/PERMISOS_FILE.");
+  }
+
   important("📁 Output", { OUT_ROOT, outDir, IS_JOB_MODE, PERMISOS_DIR, CAMPOS_DIR });
 
   const browser = await puppeteer.launch({
@@ -2206,7 +2568,6 @@ async function processOneUserFlow(page, {
       } catch (e) {
         failCount++;
         important(`❌ FAIL usuario ${userTag}`, { excelRow: u.index, error: e?.message || String(e) });
-        // snapshot de error
         try { await snapshot(page, userDir, "ERROR"); } catch {}
       }
     }
