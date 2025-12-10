@@ -20,6 +20,13 @@
 // - MODO MASIVO por Excel (EXCEL_MASIVO=true, EXCEL_FILE=EXCEL/usuarios.xlsx)
 // - LOGS a archivo + consola filtrada (LOG_DIR, CONSOLE_LEVEL)
 // - Uso de CREATE_WAIT_MS (espera configurable tras crear)
+//
+// ✅ CAMBIO QUE TE PEDÍ (para WebApp / multiusuario):
+// - Aislamiento por corrida:
+//     * JOB_OUTPUT_DIR   => carpeta base del job (si viene, todo sale ahí)
+//     * PERMISOS_DIR     => override carpeta permisos_modulos
+//     * CAMPOS_DIR       => override carpeta permisos_campossap
+//     * HTML_DIR_NAME    => nombre de la carpeta HTML dentro del job (default "HTML")
 // --------------------------------------------------------------------------------------------
 
 require("dotenv").config();
@@ -60,11 +67,26 @@ function norm(s) {
 }
 
 /* -------------------------------------------------------------------------- */
+/* ✅ BASE DIR (CAMBIO PEDIDO)                                                 */
+/* -------------------------------------------------------------------------- */
+
+const ROOT_CWD = process.cwd(); // raíz del proyecto
+const JOB_BASE_DIR = process.env.JOB_OUTPUT_DIR
+  ? path.resolve(process.env.JOB_OUTPUT_DIR) // aislado por job
+  : ROOT_CWD;
+
+const HTML_DIR_NAME = String(process.env.HTML_DIR_NAME || "HTML");
+
+/* -------------------------------------------------------------------------- */
 /* ✅ LOGGING (archivo + consola filtrada)                                     */
 /* -------------------------------------------------------------------------- */
 
 const RUN_ID = ts();
-const LOG_DIR = path.join(process.cwd(), process.env.LOG_DIR || "LOGS");
+
+// LOG_DIR puede ser absoluto o relativo
+const LOG_DIR_ENV = String(process.env.LOG_DIR || "LOGS");
+const LOG_DIR = path.isAbsolute(LOG_DIR_ENV) ? LOG_DIR_ENV : path.join(JOB_BASE_DIR, LOG_DIR_ENV);
+
 const RUN_LOG_DIR = path.join(LOG_DIR, `run_${RUN_ID}`);
 const LOG_FILE = path.join(RUN_LOG_DIR, "run.log");
 
@@ -444,11 +466,6 @@ function isTipoRequiringCounterRol(tipoTextOrEnv) {
   return t.includes("counter") || t.includes("admin") || t.includes("administrador");
 }
 
-/**
- * Busca el SELECT de "Counter rol" por LABEL/estructura (NO por ID fijo).
- * Excluye el select de "Tipo de usuario".
- * Luego hace match por VALUE o por TEXTO (y con sinónimos CAJA<->cash/register).
- */
 async function selectCounterRolIfPresent(page, tipoRes, { timeout = 12000 } = {}) {
   const wantedRaw = (process.env.NEW_USER_COUNTER_ROL || "").trim();
   if (!wantedRaw) {
@@ -1850,7 +1867,7 @@ async function clickCrearUsuarioSiCorresponde(page) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* ✅ UTIL: Abrir modal "Crear usuario" (para masivo)                           */
+/* ✅ UTIL: Abrir modal "Crear usuario" (para masivo)                          */
 /* -------------------------------------------------------------------------- */
 
 async function openCrearUsuarioModal(page) {
@@ -1866,8 +1883,7 @@ async function openCrearUsuarioModal(page) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* ✅ BLOQUE COMPLETO (TU LÓGICA) para procesar 1 usuario                       */
-/*    (Se usa igual en modo normal y modo Excel, SIN borrar pasos)             */
+/* ✅ BLOQUE COMPLETO para procesar 1 usuario                                  */
 /* -------------------------------------------------------------------------- */
 
 async function processOneUserFlow(page, {
@@ -1886,7 +1902,7 @@ async function processOneUserFlow(page, {
   await snapshot(page, outDir, "crearUsuario_lleno");
 
   // ----------------------
-  // ✅ MÓDULOS (SOLO 1 VEZ)  (tu mismo comentario original)
+  // ✅ MÓDULOS (SOLO 1 VEZ)
   // ----------------------
   await clickModulosButton(page, { timeout: 25000 });
   await sleep(500);
@@ -1926,7 +1942,7 @@ async function processOneUserFlow(page, {
   }
 
   // ----------------------
-  // ✅ CAMPOS SAP + DATOS ARTÍCULOS + GUARDAR (MÁS RÁPIDO)
+  // ✅ CAMPOS SAP + DATOS ARTÍCULOS + GUARDAR
   // ----------------------
   try {
     const bpCatalog = await extractCamposSAPGeneric(page, "#ModulosSociosDeNegocios");
@@ -2021,7 +2037,7 @@ async function processOneUserFlow(page, {
 
 (async () => {
   await fs.ensureDir(RUN_LOG_DIR);
-  important("🚀 Inicio RUN", { RUN_ID, RUN_LOG_DIR, LOG_FILE });
+  important("🚀 Inicio RUN", { RUN_ID, RUN_LOG_DIR, LOG_FILE, JOB_BASE_DIR });
 
   const BASE_URL = process.env.SCRAPE_URL || "https://sap2.llamagas.nubeprivada.biz/";
   const USER = process.env.LOGIN_USER;
@@ -2035,21 +2051,26 @@ async function processOneUserFlow(page, {
   const VIEWPORT_HEIGHT = parseInt(process.env.VIEWPORT_HEIGHT || "864", 10);
   const DEVICE_SCALE_FACTOR = parseFloat(process.env.DEVICE_SCALE_FACTOR || "1");
 
-  const PERMISOS_DIR = path.join(process.cwd(), "permisos_modulos");
+  // ✅ CAMBIO PEDIDO: PERMISOS_DIR / CAMPOS_DIR por ENV (si vienen) o default a raíz del proyecto
+  const PERMISOS_DIR = path.resolve(process.env.PERMISOS_DIR || path.join(ROOT_CWD, "permisos_modulos"));
   const envFile = (process.env.PERMISOS_FILE || "").trim();
   const permisosFileName = envFile || "branch.json";
   const permisosPath = path.join(PERMISOS_DIR, path.basename(permisosFileName));
 
-  const CAMPOS_DIR = path.join(process.cwd(), "permisos_campossap");
+  const CAMPOS_DIR = path.resolve(process.env.CAMPOS_DIR || path.join(ROOT_CWD, "permisos_campossap"));
   const camposEnvFile = (process.env.CAMPOS_FILE || "").trim();
   const camposFileName = camposEnvFile || "branch.json";
   const camposPath = path.join(CAMPOS_DIR, path.basename(camposFileName));
 
   if (!USER || !PASS) throw new Error("Faltan LOGIN_USER o LOGIN_PASS en tu .env");
 
-  // ✅ salida por run
-  const OUT_ROOT = path.join(process.cwd(), "HTML");
-  const outDir = path.join(OUT_ROOT, `run_${RUN_ID}`);
+  // ✅ CAMBIO PEDIDO: salida aislada por JOB_OUTPUT_DIR
+  // - Si JOB_OUTPUT_DIR existe => outDir = <JOB_OUTPUT_DIR>/<HTML_DIR_NAME>
+  // - Si NO existe => outDir = <proyecto>/HTML/run_<RUN_ID>
+  const IS_JOB_MODE = !!process.env.JOB_OUTPUT_DIR;
+  const OUT_ROOT = path.join(JOB_BASE_DIR, HTML_DIR_NAME);
+  const outDir = IS_JOB_MODE ? OUT_ROOT : path.join(OUT_ROOT, `run_${RUN_ID}`);
+
   await fs.ensureDir(OUT_ROOT);
   await fs.ensureDir(outDir);
   await fs.ensureDir(PERMISOS_DIR);
@@ -2057,7 +2078,7 @@ async function processOneUserFlow(page, {
 
   console.log("📁 Ruta módulos :", permisosPath);
   console.log("📁 Ruta campos  :", camposPath);
-  important("📁 Output", { outDir });
+  important("📁 Output", { OUT_ROOT, outDir, IS_JOB_MODE, PERMISOS_DIR, CAMPOS_DIR });
 
   const browser = await puppeteer.launch({
     headless: HEADLESS,
@@ -2134,7 +2155,7 @@ async function processOneUserFlow(page, {
   await sleep(900);
   await snapshot(page, outDir, "adminUsers");
 
-  // ✅ MODO MASIVO (Excel) - SIN borrar tu lógica
+  // ✅ MODO MASIVO (Excel)
   const EXCEL_MASIVO = String(process.env.EXCEL_MASIVO || "false").toLowerCase() === "true";
   const excelFile = process.env.EXCEL_FILE || "EXCEL/usuarios.xlsx";
 

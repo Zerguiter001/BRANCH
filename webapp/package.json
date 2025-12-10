@@ -1,0 +1,19 @@
+{
+  "name": "sap-scraper-webapp",
+  "version": "1.0.0",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "fs-extra": "^11.2.0",
+    "multer": "^1.4.5-lts.1",
+    "p-queue": "^8.0.1",
+    "proper-lockfile": "^4.1.2",
+    "xlsx": "^0.18.5"
+  }
+}

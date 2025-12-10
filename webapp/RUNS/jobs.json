@@ -1,0 +1,137 @@
+{
+  "mj05zwsl_k6jvvtkv": {
+    "id": "mj05zwsl_k6jvvtkv",
+    "status": "done",
+    "createdAt": "2025-12-10T15:29:08.041Z",
+    "startedAt": "2025-12-10T15:29:08.047Z",
+    "endedAt": "2025-12-10T15:29:47.191Z",
+    "excelPath": "C:\\Users\\JorgeTerrones\\Documents\\GitHub\\BRANCH\\webapp\\RUNS\\mj05zwsl_k6jvvtkv\\upload_mj05zwsi_mtc12cgl.xlsx",
+    "defaults": {
+      "permisosFile": "4_venta_puerta.json",
+      "camposFile": "",
+      "autoCreate": false,
+      "headless": false
+    },
+    "totalRows": 1,
+    "doneRows": 1,
+    "results": [
+      {
+        "index": 1,
+        "code": "z_bolog_venta_puerta_9",
+        "status": "ok",
+        "exitCode": 0,
+        "rowDir": "C:\\Users\\JorgeTerrones\\Documents\\GitHub\\BRANCH\\webapp\\RUNS\\mj05zwsl_k6jvvtkv\\row_001_z_bolog_venta_puerta_9",
+        "startedAt": "2025-12-10T15:29:08.113Z",
+        "endedAt": "2025-12-10T15:29:47.187Z"
+      }
+    ]
+  },
+  "mj060v14_35n2pmwf": {
+    "id": "mj060v14_35n2pmwf",
+    "status": "done",
+    "createdAt": "2025-12-10T15:29:52.412Z",
+    "startedAt": "2025-12-10T15:29:52.417Z",
+    "endedAt": "2025-12-10T15:30:54.244Z",
+    "excelPath": "C:\\Users\\JorgeTerrones\\Documents\\GitHub\\BRANCH\\webapp\\RUNS\\mj060v14_35n2pmwf\\upload_mj060v11_ed3z4ts0.xlsx",
+    "defaults": {
+      "permisosFile": "4_venta_puerta.json",
+      "camposFile": "",
+      "autoCreate": true,
+      "headless": false
+    },
+    "totalRows": 1,
+    "doneRows": 1,
+    "results": [
+      {
+        "index": 1,
+        "code": "z_bolog_venta_puerta_9",
+        "status": "ok",
+        "exitCode": 0,
+        "rowDir": "C:\\Users\\JorgeTerrones\\Documents\\GitHub\\BRANCH\\webapp\\RUNS\\mj060v14_35n2pmwf\\row_001_z_bolog_venta_puerta_9",
+        "startedAt": "2025-12-10T15:29:52.480Z",
+        "endedAt": "2025-12-10T15:30:54.237Z"
+      }
+    ]
+  },
+  "mj068am0_z4s6y3b5": {
+    "id": "mj068am0_z4s6y3b5",
+    "status": "done",
+    "createdAt": "2025-12-10T15:35:39.197Z",
+    "startedAt": "2025-12-10T15:35:39.204Z",
+    "endedAt": "2025-12-10T15:35:42.533Z",
+    "excelPath": "C:\\Users\\JorgeTerrones\\Documents\\GitHub\\BRANCH\\webapp\\RUNS\\mj068am0_z4s6y3b5\\upload_mj068alx_s49mqius.xlsx",
+    "defaults": {
+      "permisosFile": "",
+      "camposFile": "",
+      "autoCreate": false,
+      "headless": false
+    },
+    "totalRows": 1,
+    "doneRows": 1,
+    "results": [
+      {
+        "index": 1,
+        "code": "z_bolog_venta_puerta_9",
+        "status": "error",
+        "exitCode": 1,
+        "rowDir": "C:\\Users\\JorgeTerrones\\Documents\\GitHub\\BRANCH\\webapp\\RUNS\\mj068am0_z4s6y3b5\\row_001_z_bolog_venta_puerta_9",
+        "startedAt": "2025-12-10T15:35:39.256Z",
+        "endedAt": "2025-12-10T15:35:42.527Z"
+      }
+    ]
+  },
+  "mj069x8u_fwygabsa": {
+    "id": "mj069x8u_fwygabsa",
+    "status": "done",
+    "createdAt": "2025-12-10T15:36:55.187Z",
+    "startedAt": "2025-12-10T15:36:55.194Z",
+    "endedAt": "2025-12-10T15:37:24.939Z",
+    "excelPath": "C:\\Users\\JorgeTerrones\\Documents\\GitHub\\BRANCH\\webapp\\RUNS\\mj069x8u_fwygabsa\\upload_mj069x8r_sok5ypnu.xlsx",
+    "defaults": {
+      "permisosFile": "4_venta_puerta.json",
+      "camposFile": "",
+      "autoCreate": false,
+      "headless": false
+    },
+    "totalRows": 1,
+    "doneRows": 1,
+    "results": [
+      {
+        "index": 1,
+        "code": "z_bolog_venta_puerta_9",
+        "status": "ok",
+        "exitCode": 0,
+        "rowDir": "C:\\Users\\JorgeTerrones\\Documents\\GitHub\\BRANCH\\webapp\\RUNS\\mj069x8u_fwygabsa\\row_001_z_bolog_venta_puerta_9",
+        "startedAt": "2025-12-10T15:36:55.266Z",
+        "endedAt": "2025-12-10T15:37:24.934Z"
+      }
+    ]
+  },
+  "mj06atgi_s04lqnjf": {
+    "id": "mj06atgi_s04lqnjf",
+    "status": "done",
+    "createdAt": "2025-12-10T15:37:36.934Z",
+    "startedAt": "2025-12-10T15:37:36.940Z",
+    "endedAt": "2025-12-10T15:38:37.978Z",
+    "excelPath": "C:\\Users\\JorgeTerrones\\Documents\\GitHub\\BRANCH\\webapp\\RUNS\\mj06atgi_s04lqnjf\\upload_mj06atgg_2iy2h0hl.xlsx",
+    "defaults": {
+      "permisosFile": "4_venta_puerta.json",
+      "camposFile": "",
+      "autoCreate": true,
+      "headless": false
+    },
+    "totalRows": 1,
+    "doneRows": 1,
+    "results": [
+      {
+        "index": 1,
+        "code": "z_bolog_venta_puerta_9",
+        "status": "error",
+        "exitCode": 1,
+        "rowDir": "C:\\Users\\JorgeTerrones\\Documents\\GitHub\\BRANCH\\webapp\\RUNS\\mj06atgi_s04lqnjf\\row_001_z_bolog_venta_puerta_9",
+        "startedAt": "2025-12-10T15:37:37.001Z",
+        "endedAt": "2025-12-10T15:38:37.972Z"
+      }
+    ]
+  }
+}

@@ -1,0 +1,548 @@
+{
+  "BPG0": {
+    "nombre": "Teléfono 1",
+    "grupo": "General",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPG1": {
+    "nombre": "Teléfono 2",
+    "grupo": "General",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPG2": {
+    "nombre": "Correo",
+    "grupo": "General",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPG3": {
+    "nombre": "Activo/Inactivo",
+    "grupo": "General",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPG4": {
+    "nombre": "Empleado ventas",
+    "grupo": "General",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPC0": {
+    "nombre": "Cond. de Pago",
+    "grupo": "Condición de pago",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPC1": {
+    "nombre": "Lista de Precios",
+    "grupo": "Condición de pago",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPC2": {
+    "nombre": "País del banco",
+    "grupo": "Condición de pago",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPC3": {
+    "nombre": "Nombre del banco",
+    "grupo": "Condición de pago",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPC4": {
+    "nombre": "Código bancario",
+    "grupo": "Condición de pago",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPC5": {
+    "nombre": "Cuenta",
+    "grupo": "Condición de pago",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPC6": {
+    "nombre": "Código BIC/SWIFT",
+    "grupo": "Condición de pago",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPC7": {
+    "nombre": "Sucursal",
+    "grupo": "Condición de pago",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPC8": {
+    "nombre": "ID int.ctrl.",
+    "grupo": "Condición de pago",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPC9": {
+    "nombre": "IBAN",
+    "grupo": "Condición de pago",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPC10": {
+    "nombre": "Límite crédito",
+    "grupo": "Condición de pago",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPC11": {
+    "nombre": "Límite compra",
+    "grupo": "Condición de pago",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPIA0": {
+    "nombre": "Facturación estándar",
+    "grupo": "Dirección de facturación",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPIA1": {
+    "nombre": "ID dirección",
+    "grupo": "Dirección de facturación",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPIA2": {
+    "nombre": "Calle/número",
+    "grupo": "Dirección de facturación",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPIA3": {
+    "nombre": "Colonia",
+    "grupo": "Dirección de facturación",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPIA4": {
+    "nombre": "Ciudad",
+    "grupo": "Dirección de facturación",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPIA5": {
+    "nombre": "Código Postal",
+    "grupo": "Dirección de facturación",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPIA6": {
+    "nombre": "Condado",
+    "grupo": "Dirección de facturación",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPIA7": {
+    "nombre": "País",
+    "grupo": "Dirección de facturación",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPIA8": {
+    "nombre": "Estado",
+    "grupo": "Dirección de facturación",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPIA9": {
+    "nombre": "No. Calle",
+    "grupo": "Dirección de facturación",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPIA10": {
+    "nombre": "Edificio/planta",
+    "grupo": "Dirección de facturación",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPIA11": {
+    "nombre": "GLN",
+    "grupo": "Dirección de facturación",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPIA12": {
+    "nombre": "Fijar como estándar",
+    "grupo": "Dirección de facturación",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPDA0": {
+    "nombre": "Dirección de factura",
+    "grupo": "Dirección de Entrega",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPDA1": {
+    "nombre": "Facturación estándar",
+    "grupo": "Dirección de Entrega",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPDA2": {
+    "nombre": "ID dirección",
+    "grupo": "Dirección de Entrega",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPDA3": {
+    "nombre": "Calle/número",
+    "grupo": "Dirección de Entrega",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPDA4": {
+    "nombre": "Colonia",
+    "grupo": "Dirección de Entrega",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPDA5": {
+    "nombre": "Ciudad",
+    "grupo": "Dirección de Entrega",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPDA6": {
+    "nombre": "Código Postal",
+    "grupo": "Dirección de Entrega",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPDA7": {
+    "nombre": "Condado",
+    "grupo": "Dirección de Entrega",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPDA8": {
+    "nombre": "País",
+    "grupo": "Dirección de Entrega",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPDA9": {
+    "nombre": "Estado",
+    "grupo": "Dirección de Entrega",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPDA10": {
+    "nombre": "No. Calle",
+    "grupo": "Dirección de Entrega",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPDA11": {
+    "nombre": "Edificio/planta/Sale",
+    "grupo": "Dirección de Entrega",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPDA12": {
+    "nombre": "GLN",
+    "grupo": "Dirección de Entrega",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPDA13": {
+    "nombre": "Fijar como estándar",
+    "grupo": "Dirección de Entrega",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPCP0": {
+    "nombre": "Contacto",
+    "grupo": "Persona de contacto",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPCP1": {
+    "nombre": "Contacto Default",
+    "grupo": "Persona de contacto",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPCP2": {
+    "nombre": "Nombre",
+    "grupo": "Persona de contacto",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPCP3": {
+    "nombre": "Título",
+    "grupo": "Persona de contacto",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPCP4": {
+    "nombre": "Segundo Nombre",
+    "grupo": "Persona de contacto",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPCP5": {
+    "nombre": "Posición",
+    "grupo": "Persona de contacto",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPCP6": {
+    "nombre": "Apellido",
+    "grupo": "Persona de contacto",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPCP7": {
+    "nombre": "Teléfono 1",
+    "grupo": "Persona de contacto",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPCP8": {
+    "nombre": "Teléfono 2",
+    "grupo": "Persona de contacto",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPCP9": {
+    "nombre": "Celular",
+    "grupo": "Persona de contacto",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPCP10": {
+    "nombre": "Fax",
+    "grupo": "Persona de contacto",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPCP11": {
+    "nombre": "Email",
+    "grupo": "Persona de contacto",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPCP12": {
+    "nombre": "Observaciones 1",
+    "grupo": "Persona de contacto",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPCP13": {
+    "nombre": "Observaciones 2",
+    "grupo": "Persona de contacto",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPCP14": {
+    "nombre": "Activo",
+    "grupo": "Persona de contacto",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPCP15": {
+    "nombre": "Fijar como estándar",
+    "grupo": "Persona de contacto",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPF0": {
+    "nombre": "Consolidación de pagos",
+    "grupo": "Finanzas",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPF1": {
+    "nombre": "Consolidación de entregas",
+    "grupo": "Finanzas",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPF2": {
+    "nombre": "Proveedores",
+    "grupo": "Finanzas",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPF3": {
+    "nombre": "Obligatorio",
+    "grupo": "Finanzas",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPF4": {
+    "nombre": "Extranjeros",
+    "grupo": "Finanzas",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "BPF5": {
+    "nombre": "Indicador de impuestos",
+    "grupo": "Finanzas",
+    "container": "#ModulosSociosDeNegocios",
+    "mostrar": false,
+    "editar": false
+  },
+  "IDSD0": {
+    "nombre": "Nombre de unidad de medida de ventas",
+    "grupo": "Datos de venta",
+    "container": "#ModulosArticulos",
+    "mostrar": true,
+    "editar": true
+  },
+  "IDSD1": {
+    "nombre": "Artículos por unidad de ventas",
+    "grupo": "Datos de venta",
+    "container": "#ModulosArticulos",
+    "mostrar": true,
+    "editar": true
+  },
+  "IDSD2": {
+    "nombre": "Nombre de unidad de medida de embalaje",
+    "grupo": "Datos de venta",
+    "container": "#ModulosArticulos",
+    "mostrar": true,
+    "editar": true
+  },
+  "IDSD3": {
+    "nombre": "Cantidad por paquete",
+    "grupo": "Datos de venta",
+    "container": "#ModulosArticulos",
+    "mostrar": true,
+    "editar": true
+  },
+  "IDSD4": {
+    "nombre": "Comentarios:",
+    "grupo": "Datos de venta",
+    "container": "#ModulosArticulos",
+    "mostrar": true,
+    "editar": true
+  },
+  "IDPD0": {
+    "nombre": "Nombre de unidad de medida de compras",
+    "grupo": "Datos de Compras",
+    "container": "#ModulosArticulos",
+    "mostrar": true,
+    "editar": true
+  },
+  "IDPD1": {
+    "nombre": "Artículos por unidad de compras",
+    "grupo": "Datos de Compras",
+    "container": "#ModulosArticulos",
+    "mostrar": true,
+    "editar": true
+  },
+  "IDPD2": {
+    "nombre": "Nombre de unidad de medida de embalaje",
+    "grupo": "Datos de Compras",
+    "container": "#ModulosArticulos",
+    "mostrar": true,
+    "editar": true
+  },
+  "IDPD3": {
+    "nombre": "Cantidad por paquete",
+    "grupo": "Datos de Compras",
+    "container": "#ModulosArticulos",
+    "mostrar": true,
+    "editar": true
+  },
+  "IDIA0": {
+    "nombre": "En stock",
+    "grupo": "Inventario",
+    "container": "#ModulosArticulos",
+    "mostrar": true,
+    "editar": true
+  },
+  "IDIA1": {
+    "nombre": "Tabla",
+    "grupo": "Inventario",
+    "container": "#ModulosArticulos",
+    "mostrar": true,
+    "editar": true
+  },
+  "IDDA1": {
+    "nombre": "Tabla",
+    "grupo": "Propiedades",
+    "container": "#ModulosArticulos",
+    "mostrar": true,
+    "editar": true
+  }
+}
