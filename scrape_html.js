@@ -15,6 +15,11 @@
 // - Detecta el SELECT correcto por el LABEL (contiene "rol"/"caja"/"counter") y EXCLUYE "Tipo de usuario".
 // - Si el tipo es COUNTER/ADMIN y NO aparece el select => ERROR (para que no se “pase”)
 // - Si el tipo NO es COUNTER/ADMIN y no aparece => lo ignora
+//
+// ✅ AGREGADO SIN TOCAR TU LÓGICA:
+// - MODO MASIVO por Excel (EXCEL_MASIVO=true, EXCEL_FILE=EXCEL/usuarios.xlsx)
+// - LOGS a archivo + consola filtrada (LOG_DIR, CONSOLE_LEVEL)
+// - Uso de CREATE_WAIT_MS (espera configurable tras crear)
 // --------------------------------------------------------------------------------------------
 
 require("dotenv").config();
@@ -22,6 +27,7 @@ const fs = require("fs-extra");
 const path = require("path");
 const puppeteer = require("puppeteer");
 const readline = require("readline");
+const XLSX = require("xlsx"); // ✅ Excel masivo
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -51,6 +57,116 @@ function norm(s) {
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
+}
+
+/* -------------------------------------------------------------------------- */
+/* ✅ LOGGING (archivo + consola filtrada)                                     */
+/* -------------------------------------------------------------------------- */
+
+const RUN_ID = ts();
+const LOG_DIR = path.join(process.cwd(), process.env.LOG_DIR || "LOGS");
+const RUN_LOG_DIR = path.join(LOG_DIR, `run_${RUN_ID}`);
+const LOG_FILE = path.join(RUN_LOG_DIR, "run.log");
+
+const CONSOLE_LEVEL = String(process.env.CONSOLE_LEVEL || "important").toLowerCase(); // important|warn|error|info|debug
+const LEVELS = { debug: 10, info: 20, important: 30, warn: 40, error: 50 };
+
+const ORIG_CONSOLE = {
+  log: console.log.bind(console),
+  warn: console.warn.bind(console),
+  error: console.error.bind(console),
+};
+
+function redactSecrets(text) {
+  const s = String(text ?? "");
+  // Redacción simple: si por algún motivo se imprimen credenciales
+  return s
+    .replace(/(LOGIN_PASS\s*=\s*)(.+)/gi, "$1***")
+    .replace(/(NEW_USER_PASS\s*=\s*)(.+)/gi, "$1***")
+    .replace(/("LOGIN_PASS"\s*:\s*")([^"]+)(")/gi, '$1***$3')
+    .replace(/("NEW_USER_PASS"\s*:\s*")([^"]+)(")/gi, '$1***$3');
+}
+
+async function logToFile(line) {
+  await fs.ensureDir(RUN_LOG_DIR);
+  await fs.appendFile(LOG_FILE, line + "\n", "utf8");
+}
+
+function shouldPrint(level) {
+  const want = LEVELS[CONSOLE_LEVEL] ?? LEVELS.important;
+  const got = LEVELS[level] ?? LEVELS.info;
+  return got >= want;
+}
+
+function log(level, msg, extra) {
+  const stamp = new Date().toISOString();
+  const base = `[${stamp}] [${level.toUpperCase()}] ${redactSecrets(msg)}`;
+  const line = extra ? `${base} | ${redactSecrets(JSON.stringify(extra))}` : base;
+
+  // Siempre a archivo
+  logToFile(line).catch(() => {});
+
+  // A consola solo si corresponde
+  if (shouldPrint(level)) {
+    if (level === "warn") ORIG_CONSOLE.warn(base);
+    else if (level === "error") ORIG_CONSOLE.error(base);
+    else ORIG_CONSOLE.log(base);
+  }
+}
+
+// Captura console.log/warn/error del script (todo a archivo, consola filtrada)
+console.log = (...a) => log("info", a.map(String).join(" "));
+console.warn = (...a) => log("warn", a.map(String).join(" "));
+console.error = (...a) => log("error", a.map(String).join(" "));
+
+function important(msg, extra) {
+  log("important", msg, extra);
+}
+
+/* -------------------------------------------------------------------------- */
+/* ✅ EXCEL MASIVO                                                             */
+/* -------------------------------------------------------------------------- */
+
+function readUsersFromExcel(excelPath) {
+  const full = path.isAbsolute(excelPath) ? excelPath : path.join(process.cwd(), excelPath);
+  if (!fs.existsSync(full)) throw new Error(`No existe Excel: ${full}`);
+
+  const wb = XLSX.readFile(full, { cellDates: true });
+  const sheetName = wb.SheetNames[0];
+  const ws = wb.Sheets[sheetName];
+  const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+
+  // Espera headers EXACTOS como variables env:
+  const keys = [
+    "NEW_USER_SUCURSAL",
+    "NEW_USER_CODE",
+    "NEW_USER_NAME",
+    "NEW_USER_EMAIL",
+    "NEW_USER_PASS",
+    "NEW_USER_TIPO",
+    "NEW_USER_COUNTER_ROL",
+  ];
+
+  const users = [];
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i] || {};
+    const u = {};
+    for (const k of keys) u[k] = String(r[k] ?? "").trim();
+
+    const ok =
+      u.NEW_USER_SUCURSAL &&
+      u.NEW_USER_CODE &&
+      u.NEW_USER_NAME &&
+      u.NEW_USER_EMAIL &&
+      u.NEW_USER_PASS &&
+      u.NEW_USER_TIPO;
+
+    if (!ok) continue; // ignora filas incompletas/vacías
+
+    users.push({ index: i + 2, ...u }); // +2 por header y 1-based
+  }
+
+  return { users, excelFullPath: full, sheetName, totalRows: rows.length };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -130,6 +246,7 @@ async function clickByText(page, text, { timeout = 30000 } = {}) {
  */
 async function snapshot(page, outDir, prefix, { maxWidth = 2400 } = {}) {
   const stamp = ts();
+  await fs.ensureDir(outDir); // ✅ aseguramos carpeta
 
   try {
     await page.evaluate(() => {
@@ -167,9 +284,8 @@ async function snapshot(page, outDir, prefix, { maxWidth = 2400 } = {}) {
   await fs.writeFile(htmlPath, html, "utf8");
   await page.screenshot({ path: pngPath, fullPage: true });
 
-  console.log(`📌 Snapshot: ${prefix}`);
-  console.log("   HTML:", htmlPath);
-  console.log("   PNG :", pngPath);
+  // ✅ para que se vea en consola con CONSOLE_LEVEL=important
+  important(`📌 Snapshot: ${prefix}`, { html: htmlPath, png: pngPath });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -205,7 +321,7 @@ async function setInputValueNative(page, selector, value, { timeout = 15000 } = 
   );
 
   if (!ok?.ok) {
-    console.log(`⚠️ setInputValueNative fallo en ${selector}:`, ok?.reason || "sin detalle");
+    console.log(`⚠️ setInputValueNative fallo en ${selector}: ${ok?.reason || "sin detalle"}`);
   } else if (String(value) !== String(ok.now)) {
     console.log(`⚠️ Valor diferente en ${selector}. Deseado="${value}" / Actual="${ok.now}"`);
   }
@@ -340,13 +456,11 @@ async function selectCounterRolIfPresent(page, tipoRes, { timeout = 12000 } = {}
     return;
   }
 
-  // Tipo real (prioriza lo que ya seleccionó el UI)
-  const tipoText = (tipoRes && tipoRes.text) ? tipoRes.text : (process.env.NEW_USER_TIPO || "");
+  const tipoText = tipoRes && tipoRes.text ? tipoRes.text : process.env.NEW_USER_TIPO || "";
   const required = isTipoRequiringCounterRol(tipoText);
 
   await waitAdminUsersModalOpen(page, { timeout: 25000 });
 
-  // Esperar a que el framework pinte el select si es requerido
   if (required) {
     try {
       await page.waitForFunction(() => {
@@ -378,42 +492,51 @@ async function selectCounterRolIfPresent(page, tipoRes, { timeout = 12000 } = {}
 
           const lab = norm2(labEl.textContent);
 
-          // EXCLUIR "Tipo de usuario"
           if (lab.includes("tipo") && lab.includes("usuario")) continue;
 
           const id = norm2(sel.id || "");
           const name = norm2(sel.getAttribute("name") || "");
 
-          // Heurística para "rol"
           const looksRol =
-            lab.includes("rol") || lab.includes("caja") || lab.includes("counter") ||
-            id.includes("rol") || id.includes("caja") || id.includes("cash") || id.includes("register") || id.includes("counter") ||
-            name.includes("rol") || name.includes("caja") || name.includes("cash") || name.includes("register") || name.includes("counter");
+            lab.includes("rol") ||
+            lab.includes("caja") ||
+            lab.includes("counter") ||
+            id.includes("rol") ||
+            id.includes("caja") ||
+            id.includes("cash") ||
+            id.includes("register") ||
+            id.includes("counter") ||
+            name.includes("rol") ||
+            name.includes("caja") ||
+            name.includes("cash") ||
+            name.includes("register") ||
+            name.includes("counter");
 
           if (!looksRol) continue;
           if (!isVisible(sel)) continue;
 
-          // Penaliza si por opciones parece ser el select de TIPO
           const optTxt = Array.from(sel.querySelectorAll("option"))
             .map((o) => norm2(o.textContent))
             .join(" ");
           const looksTipo = optTxt.includes("branch") && optTxt.includes("counter") && optTxt.includes("admin");
+
           const scoreBase =
             (lab.includes("rol") ? 5 : 0) +
             (lab.includes("caja") ? 5 : 0) +
             (lab.includes("counter") ? 4 : 0) +
             (id.includes("rol") || name.includes("rol") ? 3 : 0) +
-            (id.includes("cash") || name.includes("cash") || id.includes("register") || name.includes("register") ? 3 : 0) +
+            (id.includes("cash") || name.includes("cash") || id.includes("register") || name.includes("register")
+              ? 3
+              : 0) +
             (looksTipo ? -100 : 0);
 
-          candidates.push({ score: scoreBase, lab: labEl.textContent || "", sel });
+          candidates.push({ score: scoreBase });
         }
 
         if (!candidates.length) return false;
 
         candidates.sort((a, b) => b.score - a.score);
-        const best = candidates[0];
-        return !!best && best.score > 0;
+        return candidates[0].score > 0;
       }, { timeout });
     } catch {
       throw new Error("❌ Se esperaba 'Counter rol' (por ser COUNTER/ADMIN) pero no apareció el SELECT en el modal.");
@@ -441,7 +564,6 @@ async function selectCounterRolIfPresent(page, tipoRes, { timeout = 12000 } = {}
       return r.width > 0 && r.height > 0 && st.display !== "none" && st.visibility !== "hidden";
     };
 
-    // limpiar marcas previas
     modal.querySelectorAll('[data-autofill="counterrol"]').forEach((x) => x.removeAttribute("data-autofill"));
 
     const groups = Array.from(modal.querySelectorAll(".form-group, .input-group, .mb-2, .mb-3"));
@@ -454,7 +576,6 @@ async function selectCounterRolIfPresent(page, tipoRes, { timeout = 12000 } = {}
 
       const lab = norm2(labEl.textContent);
 
-      // EXCLUIR Tipo usuario
       if (lab.includes("tipo") && lab.includes("usuario")) continue;
 
       const id = norm2(sel.id || "");
@@ -462,9 +583,19 @@ async function selectCounterRolIfPresent(page, tipoRes, { timeout = 12000 } = {}
       if (!isVisible(sel)) continue;
 
       const looksRol =
-        lab.includes("rol") || lab.includes("caja") || lab.includes("counter") ||
-        id.includes("rol") || id.includes("caja") || id.includes("cash") || id.includes("register") || id.includes("counter") ||
-        name.includes("rol") || name.includes("caja") || name.includes("cash") || name.includes("register") || name.includes("counter");
+        lab.includes("rol") ||
+        lab.includes("caja") ||
+        lab.includes("counter") ||
+        id.includes("rol") ||
+        id.includes("caja") ||
+        id.includes("cash") ||
+        id.includes("register") ||
+        id.includes("counter") ||
+        name.includes("rol") ||
+        name.includes("caja") ||
+        name.includes("cash") ||
+        name.includes("register") ||
+        name.includes("counter");
 
       if (!looksRol) continue;
 
@@ -521,7 +652,6 @@ async function selectCounterRolIfPresent(page, tipoRes, { timeout = 12000 } = {}
       return toks.length ? toks.every((tk) => n.includes(tk)) : n.includes(wanted);
     };
 
-    // Match: value exact -> text exact -> includes -> token match
     let match =
       candidatesOpts.find((o) => norm2(o.value) === wanted) ||
       candidatesOpts.find((o) => norm2(o.text) === wanted) ||
@@ -530,7 +660,6 @@ async function selectCounterRolIfPresent(page, tipoRes, { timeout = 12000 } = {}
       candidatesOpts.find((o) => tokenMatch(o.text)) ||
       candidatesOpts.find((o) => tokenMatch(o.value));
 
-    // Sinónimos CAJA <-> CASH/REGISTER
     if (!match) {
       const wantsCaja = wanted.includes("caja");
       const wantsCash = wanted.includes("cash") || wanted.includes("register") || wanted.includes("caj");
@@ -577,7 +706,6 @@ async function selectCounterRolIfPresent(page, tipoRes, { timeout = 12000 } = {}
     };
   }, { wantedRaw });
 
-  // cleanup
   try {
     await page.evaluate(() => {
       const modal = document.querySelector("#adminUsersModal");
@@ -678,7 +806,7 @@ async function waitSucursalCommitted(page, wantedRaw, { timeout = 6000 } = {}) {
 
 async function ensureSucursalCommittedBeforeCreate(page) {
   const st1 = await debugSucursalState(page);
-  console.log("🧪 Estado Sucursal (antes de Crear):", st1);
+  console.log("🧪 Estado Sucursal (antes de Crear):", JSON.stringify(st1));
 
   if (st1.ok && !st1.isInvalid && !isSucursalFeedbackBlocking(st1)) return;
 
@@ -689,7 +817,7 @@ async function ensureSucursalCommittedBeforeCreate(page) {
   await setAutocompleteInAdminModalByLabel(page, "sucursal", wanted, { timeout: 25000 });
 
   const st2 = await debugSucursalState(page);
-  console.log("🧪 Estado Sucursal (después de re-commit):", st2);
+  console.log("🧪 Estado Sucursal (después de re-commit):", JSON.stringify(st2));
 
   if (st2.ok && (st2.isInvalid || isSucursalFeedbackBlocking(st2))) {
     throw new Error("❌ Sucursal sigue inválida. Se ve texto, pero el AUTOCOMPLETE no quedó seleccionado realmente.");
@@ -984,7 +1112,7 @@ async function setAutocompleteInAdminModalByLabel(page, labelIncludes, wantedTex
         }
 
         const stA = await debugSucursalState(page);
-        console.log("⚠️ MARK+click no confirmó. Estado:", stA);
+        console.log("⚠️ MARK+click no confirmó. Estado:", JSON.stringify(stA));
       } catch (e) {
         console.log("⚠️ Falló page.click('[data-autofill=\"pick\"]'). Intento otros métodos.", e.message || e);
       }
@@ -999,7 +1127,7 @@ async function setAutocompleteInAdminModalByLabel(page, labelIncludes, wantedTex
         }
 
         const stB = await debugSucursalState(page);
-        console.log("⚠️ Teclado index+enter no confirmó. Estado:", stB);
+        console.log("⚠️ Teclado index+enter no confirmó. Estado:", JSON.stringify(stB));
       } catch (e) {
         console.log("⚠️ Falló teclado index+enter:", e.message || e);
       }
@@ -1019,7 +1147,7 @@ async function setAutocompleteInAdminModalByLabel(page, labelIncludes, wantedTex
         }
 
         const stC = await debugSucursalState(page);
-        console.log("⚠️ Mouse coords no confirmó. Estado:", stC);
+        console.log("⚠️ Mouse coords no confirmó. Estado:", JSON.stringify(stC));
       } catch (e) {
         console.log("⚠️ Falló mouse coords:", e.message || e);
       }
@@ -1062,7 +1190,7 @@ async function selectSucursal(page) {
 
   await setAutocompleteInAdminModalByLabel(page, "sucursal", wanted, { timeout: 25000 });
   const st = await debugSucursalState(page);
-  console.log(`✅ Sucursal seleccionada (estado):`, st);
+  console.log(`✅ Sucursal seleccionada (estado): ${JSON.stringify(st)}`);
 }
 
 // Forzar valor estable para código (por si el UI lo pisa)
@@ -1120,11 +1248,11 @@ async function fillCreateUserFromEnv(page) {
   // 1) Tipo usuario (SELECT)
   const tipoRes = await selectTipoUsuario(page);
 
-  // ✅ NUEVO: Counter rol (solo si aparece / requerido en COUNTER|ADMIN)
+  // ✅ Counter rol (solo si aparece / requerido en COUNTER|ADMIN)
   await sleep(350);
   await selectCounterRolIfPresent(page, tipoRes);
 
-  // 2) Sucursal (AUTOCOMPLETE) ✅
+  // 2) Sucursal (AUTOCOMPLETE)
   await selectSucursal(page);
 
   await sleep(350);
@@ -1183,7 +1311,7 @@ async function fillCreateUserFromEnv(page) {
   }
 
   const st = await debugSucursalState(page);
-  console.log("🧪 Estado Sucursal (post fill):", st);
+  console.log("🧪 Estado Sucursal (post fill): " + JSON.stringify(st));
 
   console.log("✅ Modal Crear usuario llenado (Tipo SELECT + Counter rol + Sucursal AUTOCOMPLETE REAL + Código estable).");
 }
@@ -1690,7 +1818,7 @@ async function clickCrearUsuarioSiCorresponde(page) {
   const AUTO_CREATE = String(process.env.AUTO_CREATE || "false").toLowerCase() === "true";
   if (!AUTO_CREATE) {
     console.log("ℹ️ AUTO_CREATE=false -> NO se hace click en 'Crear'.");
-    return;
+    return { clicked: false };
   }
 
   await ensureSucursalCommittedBeforeCreate(page);
@@ -1718,120 +1846,14 @@ async function clickCrearUsuarioSiCorresponde(page) {
   });
 
   console.log("✅ Click en 'Crear' realizado (AUTO_CREATE=true).");
+  return { clicked: true };
 }
 
 /* -------------------------------------------------------------------------- */
-/* MAIN                                                                       */
+/* ✅ UTIL: Abrir modal "Crear usuario" (para masivo)                           */
 /* -------------------------------------------------------------------------- */
 
-(async () => {
-  const BASE_URL = process.env.SCRAPE_URL || "https://sap2.llamagas.nubeprivada.biz/";
-  const USER = process.env.LOGIN_USER;
-  const PASS = process.env.LOGIN_PASS;
-
-  const HEADLESS = String(process.env.HEADLESS || "true").toLowerCase() === "true";
-  const KEEP_OPEN = String(process.env.KEEP_OPEN || "false").toLowerCase() === "true";
-  const AUTO_SAVE_CAMPOS = String(process.env.AUTO_SAVE_CAMPOS || "true").toLowerCase() === "true";
-
-  const VIEWPORT_WIDTH = parseInt(process.env.VIEWPORT_WIDTH || "1536", 10);
-  const VIEWPORT_HEIGHT = parseInt(process.env.VIEWPORT_HEIGHT || "864", 10);
-  const DEVICE_SCALE_FACTOR = parseFloat(process.env.DEVICE_SCALE_FACTOR || "1");
-
-  const PERMISOS_DIR = path.join(process.cwd(), "permisos_modulos");
-  const envFile = (process.env.PERMISOS_FILE || "").trim();
-  const permisosFileName = envFile || "branch.json";
-  const permisosPath = path.join(PERMISOS_DIR, path.basename(permisosFileName));
-
-  const CAMPOS_DIR = path.join(process.cwd(), "permisos_campossap");
-  const camposEnvFile = (process.env.CAMPOS_FILE || "").trim();
-  const camposFileName = camposEnvFile || "branch.json";
-  const camposPath = path.join(CAMPOS_DIR, path.basename(camposFileName));
-
-  if (!USER || !PASS) throw new Error("Faltan LOGIN_USER o LOGIN_PASS en tu .env");
-
-  const outDir = path.join(process.cwd(), "HTML");
-  await fs.ensureDir(outDir);
-  await fs.ensureDir(PERMISOS_DIR);
-  await fs.ensureDir(CAMPOS_DIR);
-
-  console.log("📁 Ruta módulos :", permisosPath);
-  console.log("📁 Ruta campos  :", camposPath);
-
-  const browser = await puppeteer.launch({
-    headless: HEADLESS,
-    ignoreHTTPSErrors: true,
-    defaultViewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT, deviceScaleFactor: DEVICE_SCALE_FACTOR },
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      `--window-size=${VIEWPORT_WIDTH},${VIEWPORT_HEIGHT}`,
-      "--start-maximized",
-    ],
-  });
-
-  const page = await browser.newPage();
-  page.setDefaultNavigationTimeout(120000);
-  await page.setViewport({ width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT, deviceScaleFactor: DEVICE_SCALE_FACTOR });
-
-  await page.setUserAgent(
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
-  );
-
-  page.on("pageerror", (e) => console.log("PAGEERROR:", e.message));
-  page.on("console", (msg) => {
-    const t = msg.type();
-    if (t === "error" || t === "warning") console.log("BROWSER:", t, msg.text());
-  });
-
-  console.log("Abriendo:", BASE_URL);
-  await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
-
-  // Login
-  await page.waitForSelector("#usuario", { timeout: 60000 });
-  await typeSlow(page, "#usuario", USER, { delay: 20 });
-
-  await page.waitForSelector('input[type="password"]', { timeout: 60000 });
-  await typeSlow(page, 'input[type="password"]', PASS, { delay: 20 });
-
-  await page.click('button[type="submit"]');
-  await sleep(900);
-
-  // Detectar 2FA
-  let needs2FA = false;
-  try {
-    await page.waitForFunction(() => {
-      const m = document.getElementById("TwoStepsModal-TwoSteps");
-      return !!m && m.classList.contains("show");
-    }, { timeout: 8000 });
-    needs2FA = true;
-  } catch {}
-
-  if (needs2FA) {
-    console.log("2FA detectado. Ingresa el código de 6 dígitos del correo.");
-    const code = (await ask("Código 2FA: ")).trim();
-
-    const otpSel = '#TwoStepsModal-TwoSteps input[type="text"]';
-    await page.waitForSelector(otpSel, { timeout: 30000 });
-    await typeSlow(page, otpSel, code, { delay: 40 });
-    await page.keyboard.press("Enter");
-    await sleep(1100);
-  }
-
-  // Ir a Admin. de usuarios
-  const adminCardSel = 'span[routerlink="/adminUsers"]';
-  await page.waitForSelector(adminCardSel, { timeout: 60000 });
-  await page.click(adminCardSel);
-
-  await page.waitForFunction(
-    () => window.location.pathname.includes("/adminUsers") || window.location.href.includes("/adminUsers"),
-    { timeout: 60000 }
-  );
-
-  await sleep(900);
-  await snapshot(page, outDir, "adminUsers");
-
-  // Crear usuario
+async function openCrearUsuarioModal(page) {
   const crearBtnSel = 'button.btn.btn-outline-secondary.btn-timbra-one.mr-sm-3';
   try {
     await page.waitForSelector(crearBtnSel, { timeout: 15000 });
@@ -1839,17 +1861,32 @@ async function clickCrearUsuarioSiCorresponde(page) {
   } catch {
     await clickByText(page, "Crear usuario", { timeout: 20000 });
   }
-
   await sleep(900);
+  await waitAdminUsersModalOpen(page, { timeout: 25000 });
+}
+
+/* -------------------------------------------------------------------------- */
+/* ✅ BLOQUE COMPLETO (TU LÓGICA) para procesar 1 usuario                       */
+/*    (Se usa igual en modo normal y modo Excel, SIN borrar pasos)             */
+/* -------------------------------------------------------------------------- */
+
+async function processOneUserFlow(page, {
+  outDir,
+  permisosPath,
+  camposPath,
+  AUTO_SAVE_CAMPOS,
+} = {}) {
+  // 1) Abrir modal Crear usuario
+  await openCrearUsuarioModal(page);
   await snapshot(page, outDir, "crearUsuario");
 
-  // Llenar inputs + Tipo + CounterRol + Sucursal + Contraseñas
+  // 2) Llenar inputs + Tipo + CounterRol + Sucursal + Contraseñas
   await fillCreateUserFromEnv(page);
   await sleep(400);
   await snapshot(page, outDir, "crearUsuario_lleno");
 
   // ----------------------
-  // ✅ MÓDULOS (SOLO 1 VEZ)
+  // ✅ MÓDULOS (SOLO 1 VEZ)  (tu mismo comentario original)
   // ----------------------
   await clickModulosButton(page, { timeout: 25000 });
   await sleep(500);
@@ -1963,21 +2000,224 @@ async function clickCrearUsuarioSiCorresponde(page) {
   }
 
   // ----------------------
-  // ✅ CREAR (según .env)
+  // ✅ CREAR (según .env) + espera CREATE_WAIT_MS
   // ----------------------
-  await clickCrearUsuarioSiCorresponde(page);
-  await sleep(800);
-  await snapshot(page, outDir, "post_crear_si_corresponde");
+  const r = await clickCrearUsuarioSiCorresponde(page);
 
-  console.log("Listo ✅");
+  const waitMs = Number(process.env.CREATE_WAIT_MS || 800);
+  if (r?.clicked) {
+    console.log(`⏳ Esperando CREATE_WAIT_MS=${waitMs}ms...`);
+    await sleep(waitMs);
+  } else {
+    await sleep(800);
+  }
+
+  await snapshot(page, outDir, "post_crear_si_corresponde");
+}
+
+/* -------------------------------------------------------------------------- */
+/* MAIN                                                                       */
+/* -------------------------------------------------------------------------- */
+
+(async () => {
+  await fs.ensureDir(RUN_LOG_DIR);
+  important("🚀 Inicio RUN", { RUN_ID, RUN_LOG_DIR, LOG_FILE });
+
+  const BASE_URL = process.env.SCRAPE_URL || "https://sap2.llamagas.nubeprivada.biz/";
+  const USER = process.env.LOGIN_USER;
+  const PASS = process.env.LOGIN_PASS;
+
+  const HEADLESS = String(process.env.HEADLESS || "true").toLowerCase() === "true";
+  const KEEP_OPEN = String(process.env.KEEP_OPEN || "false").toLowerCase() === "true";
+  const AUTO_SAVE_CAMPOS = String(process.env.AUTO_SAVE_CAMPOS || "true").toLowerCase() === "true";
+
+  const VIEWPORT_WIDTH = parseInt(process.env.VIEWPORT_WIDTH || "1536", 10);
+  const VIEWPORT_HEIGHT = parseInt(process.env.VIEWPORT_HEIGHT || "864", 10);
+  const DEVICE_SCALE_FACTOR = parseFloat(process.env.DEVICE_SCALE_FACTOR || "1");
+
+  const PERMISOS_DIR = path.join(process.cwd(), "permisos_modulos");
+  const envFile = (process.env.PERMISOS_FILE || "").trim();
+  const permisosFileName = envFile || "branch.json";
+  const permisosPath = path.join(PERMISOS_DIR, path.basename(permisosFileName));
+
+  const CAMPOS_DIR = path.join(process.cwd(), "permisos_campossap");
+  const camposEnvFile = (process.env.CAMPOS_FILE || "").trim();
+  const camposFileName = camposEnvFile || "branch.json";
+  const camposPath = path.join(CAMPOS_DIR, path.basename(camposFileName));
+
+  if (!USER || !PASS) throw new Error("Faltan LOGIN_USER o LOGIN_PASS en tu .env");
+
+  // ✅ salida por run
+  const OUT_ROOT = path.join(process.cwd(), "HTML");
+  const outDir = path.join(OUT_ROOT, `run_${RUN_ID}`);
+  await fs.ensureDir(OUT_ROOT);
+  await fs.ensureDir(outDir);
+  await fs.ensureDir(PERMISOS_DIR);
+  await fs.ensureDir(CAMPOS_DIR);
+
+  console.log("📁 Ruta módulos :", permisosPath);
+  console.log("📁 Ruta campos  :", camposPath);
+  important("📁 Output", { outDir });
+
+  const browser = await puppeteer.launch({
+    headless: HEADLESS,
+    ignoreHTTPSErrors: true,
+    defaultViewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT, deviceScaleFactor: DEVICE_SCALE_FACTOR },
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      `--window-size=${VIEWPORT_WIDTH},${VIEWPORT_HEIGHT}`,
+      "--start-maximized",
+    ],
+  });
+
+  const page = await browser.newPage();
+  page.setDefaultNavigationTimeout(120000);
+  await page.setViewport({ width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT, deviceScaleFactor: DEVICE_SCALE_FACTOR });
+
+  await page.setUserAgent(
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+  );
+
+  // Browser logs: solo warning/error al log
+  page.on("pageerror", (e) => console.log("PAGEERROR:", e.message));
+  page.on("console", (msg) => {
+    const t = msg.type();
+    if (t === "error" || t === "warning") console.log("BROWSER:", t, msg.text());
+  });
+
+  important("🌐 Abriendo URL", { BASE_URL });
+  await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+
+  // Login
+  await page.waitForSelector("#usuario", { timeout: 60000 });
+  await typeSlow(page, "#usuario", USER, { delay: 20 });
+
+  await page.waitForSelector('input[type="password"]', { timeout: 60000 });
+  await typeSlow(page, 'input[type="password"]', PASS, { delay: 20 });
+
+  await page.click('button[type="submit"]');
+  await sleep(900);
+
+  // Detectar 2FA
+  let needs2FA = false;
+  try {
+    await page.waitForFunction(() => {
+      const m = document.getElementById("TwoStepsModal-TwoSteps");
+      return !!m && m.classList.contains("show");
+    }, { timeout: 8000 });
+    needs2FA = true;
+  } catch {}
+
+  if (needs2FA) {
+    important("🔐 2FA detectado. Ingresa el código de 6 dígitos.");
+    const code = (await ask("Código 2FA: ")).trim();
+
+    const otpSel = '#TwoStepsModal-TwoSteps input[type="text"]';
+    await page.waitForSelector(otpSel, { timeout: 30000 });
+    await typeSlow(page, otpSel, code, { delay: 40 });
+    await page.keyboard.press("Enter");
+    await sleep(1100);
+  }
+
+  // Ir a Admin. de usuarios
+  const adminCardSel = 'span[routerlink="/adminUsers"]';
+  await page.waitForSelector(adminCardSel, { timeout: 60000 });
+  await page.click(adminCardSel);
+
+  await page.waitForFunction(
+    () => window.location.pathname.includes("/adminUsers") || window.location.href.includes("/adminUsers"),
+    { timeout: 60000 }
+  );
+
+  await sleep(900);
+  await snapshot(page, outDir, "adminUsers");
+
+  // ✅ MODO MASIVO (Excel) - SIN borrar tu lógica
+  const EXCEL_MASIVO = String(process.env.EXCEL_MASIVO || "false").toLowerCase() === "true";
+  const excelFile = process.env.EXCEL_FILE || "EXCEL/usuarios.xlsx";
+
+  if (EXCEL_MASIVO) {
+    const { users, excelFullPath, sheetName, totalRows } = readUsersFromExcel(excelFile);
+    important("📄 Excel leído", { excelFullPath, sheetName, totalRows, usuarios_validos: users.length });
+
+    if (!users.length) {
+      throw new Error("Tu Excel no tiene filas válidas. Asegúrate de llenar todas las columnas requeridas.");
+    }
+
+    let okCount = 0;
+    let failCount = 0;
+
+    for (let i = 0; i < users.length; i++) {
+      const u = users[i];
+
+      // Setear ENV por usuario (evita arrastre)
+      process.env.NEW_USER_SUCURSAL = u.NEW_USER_SUCURSAL || "";
+      process.env.NEW_USER_CODE = u.NEW_USER_CODE || "";
+      process.env.NEW_USER_NAME = u.NEW_USER_NAME || "";
+      process.env.NEW_USER_EMAIL = u.NEW_USER_EMAIL || "";
+      process.env.NEW_USER_PASS = u.NEW_USER_PASS || "";
+      process.env.NEW_USER_TIPO = u.NEW_USER_TIPO || "";
+      process.env.NEW_USER_COUNTER_ROL = u.NEW_USER_COUNTER_ROL || "";
+
+      const userTag = `${u.NEW_USER_CODE}`.replace(/[^\w.-]+/g, "_");
+      const userDir = path.join(outDir, `user_${String(i + 1).padStart(3, "0")}_${userTag}`);
+      await fs.ensureDir(userDir);
+
+      important(`👤 (${i + 1}/${users.length}) PROCESANDO`, {
+        excelRow: u.index,
+        code: u.NEW_USER_CODE,
+        tipo: u.NEW_USER_TIPO,
+        sucursal: u.NEW_USER_SUCURSAL,
+      });
+
+      try {
+        await processOneUserFlow(page, {
+          outDir: userDir,
+          permisosPath,
+          camposPath,
+          AUTO_SAVE_CAMPOS,
+        });
+
+        okCount++;
+        important(`✅ OK usuario ${userTag}`, { excelRow: u.index });
+      } catch (e) {
+        failCount++;
+        important(`❌ FAIL usuario ${userTag}`, { excelRow: u.index, error: e?.message || String(e) });
+        // snapshot de error
+        try { await snapshot(page, userDir, "ERROR"); } catch {}
+      }
+    }
+
+    important("📌 RESUMEN MASIVO", { ok: okCount, fail: failCount, total: users.length, outDir, log: LOG_FILE });
+
+    if (KEEP_OPEN) {
+      important("🟢 KEEP_OPEN=true -> navegador quedará abierto.");
+      await ask("Presiona ENTER para cerrar el navegador...");
+    }
+
+    await browser.close();
+    return;
+  }
+
+  // ✅ MODO NORMAL (1 usuario por .env)
+  await processOneUserFlow(page, {
+    outDir,
+    permisosPath,
+    camposPath,
+    AUTO_SAVE_CAMPOS,
+  });
+
+  important("✅ Listo (modo normal).", { outDir, log: LOG_FILE });
 
   if (KEEP_OPEN) {
-    console.log("🟢 KEEP_OPEN=true -> navegador quedará abierto.");
+    important("🟢 KEEP_OPEN=true -> navegador quedará abierto.");
     await ask("Presiona ENTER para cerrar el navegador...");
   }
 
   await browser.close();
 })().catch((err) => {
-  console.error("Error:", err && err.message ? err.message : err);
+  important("💥 Error fatal", { error: err?.message || String(err) });
   process.exit(1);
 });
