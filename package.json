@@ -11,7 +11,9 @@
   "description": "",
   "dependencies": {
     "dotenv": "^17.2.3",
+    "express": "^5.2.1",
     "fs-extra": "^11.3.2",
+    "multer": "^2.0.2",
     "puppeteer": "^24.32.1",
     "xlsx": "^0.18.5"
   }

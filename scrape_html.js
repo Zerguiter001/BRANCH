@@ -2110,16 +2110,27 @@ async function processOneUserFlow(page, {
     needs2FA = true;
   } catch {}
 
-  if (needs2FA) {
-    important("🔐 2FA detectado. Ingresa el código de 6 dígitos.");
-    const code = (await ask("Código 2FA: ")).trim();
+if (needs2FA) {
+  important("🔐 2FA detectado.");
 
-    const otpSel = '#TwoStepsModal-TwoSteps input[type="text"]';
-    await page.waitForSelector(otpSel, { timeout: 30000 });
-    await typeSlow(page, otpSel, code, { delay: 40 });
-    await page.keyboard.press("Enter");
-    await sleep(1100);
+  const preset = String(process.env.OTP_CODE || "").trim();
+  let code = preset;
+
+  if (!code) {
+    // Si corre como JOB desde server, NO queremos quedarnos esperando stdin
+    if (!process.stdin.isTTY) {
+      throw new Error("2FA detectado pero no se envió OTP_CODE. Ponlo en la UI (OTP 2FA).");
+    }
+    code = (await ask("Código 2FA: ")).trim();
   }
+
+  const otpSel = '#TwoStepsModal-TwoSteps input[type="text"]';
+  await page.waitForSelector(otpSel, { timeout: 30000 });
+  await typeSlow(page, otpSel, code, { delay: 40 });
+  await page.keyboard.press("Enter");
+  await sleep(1100);
+}
+
 
   // Ir a Admin. de usuarios
   const adminCardSel = 'span[routerlink="/adminUsers"]';

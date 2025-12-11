@@ -1,0 +1,776 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>BRANCH | Creación Usuarios</title>
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <style>
+    body { background: linear-gradient(to bottom, #f8f9fa, #e9ecef); font-size: 1rem; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    .card { border: none; border-radius: 20px; box-shadow: 0 6px 25px rgba(0,0,0,0.08); transition: transform 0.3s ease; }
+    .card:hover { transform: translateY(-5px); }
+    .card-body { padding: 2.5rem; }
+    .card-title { color: #2c3e50; font-weight: 700; font-size: 1.3rem; letter-spacing: 0.5px; }
+    .btn-primary { background-color: #3498db; border: none; transition: all 0.3s; font-size: 1rem; padding: 0.8rem 1.2rem; border-radius: 8px; }
+    .btn-primary:hover { background-color: #2980b9; transform: translateY(-2px); box-shadow: 0 4px 12px rgba(52,152,219,0.3); }
+    pre { background: #2c3e50; color: #ecf0f1; padding: 20px; border-radius: 15px; max-height: 450px; overflow: auto; font-size: 0.9rem; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .form-label { font-weight: 600; color: #34495e; font-size: 1rem; }
+    .form-control, .form-select { font-size: 1rem; padding: 0.8rem; border-radius: 8px; border: 1px solid #bdc3c7; transition: border-color 0.3s; }
+    .form-control:focus, .form-select:focus { border-color: #3498db; box-shadow: 0 0 0 0.2rem rgba(52,152,219,0.25); }
+    .alert { border-radius: 10px; font-size: 0.95rem; padding: 1rem; }
+    .badge { padding: 0.6em 0.9em; font-size: 0.9em; border-radius: 20px; }
+    .icon-spin { animation: fa-spin 1s infinite linear; }
+    @keyframes fa-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    #tplView { max-height: 500px; overflow: auto; border-radius: 10px; border: 1px solid #e0e0e0; }
+    .table { border-radius: 10px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+    .table th { background: #ecf0f1; color: #2c3e50; font-weight: 600; }
+    .table td input, .table td select { width: 100%; min-width: 150px; border-radius: 6px; }
+    .table-hover tbody tr:hover { background-color: #f5f7f9; }
+    @media (max-width: 768px) {
+      .card-body { padding: 1.8rem; }
+      .btn-primary { font-size: 0.95rem; padding: 0.7rem 1rem; }
+      .form-control, .form-select { font-size: 0.95rem; padding: 0.7rem; }
+    }
+    #editTable th.text-center, #newTable th.text-center { width: 120px; }
+    .form-check-input { transform: scale(1.3); }
+  </style>
+</head>
+
+<body>
+<div class="container py-5">
+  <div class="d-flex align-items-center justify-content-between mb-4">
+    <h3 class="m-0 fw-bold text-dark">Creación Usuarios (UI)</h3>
+  </div>
+
+  <!-- 1) Data -->
+  <div class="row g-4 mb-4">
+    <div class="col-12">
+      <div class="card">
+        <div class="card-body">
+          <h5 class="card-title"><i class="fas fa-table me-2 text-primary"></i>1) Data</h5>
+
+          <div class="mb-3">
+            <label class="form-label">Cargar desde Excel (.xlsx) (headers EXACTOS)</label>
+            <div class="input-group">
+              <span class="input-group-text"><i class="fas fa-file-excel"></i></span>
+              <input id="previewExcel" class="form-control" type="file" accept=".xlsx,.xls"/>
+            </div>
+            <div class="form-text mono">
+              Headers: NEW_USER_SUCURSAL, NEW_USER_CODE, NEW_USER_NAME, NEW_USER_EMAIL, NEW_USER_PASS, NEW_USER_TIPO, NEW_USER_COUNTER_ROL
+            </div>
+          </div>
+
+          <div class="d-flex gap-2 mb-3">
+            <button id="btnAddManualRow" class="btn btn-success"><i class="fas fa-plus me-2"></i>Agregar Fila</button>
+            <button id="btnClearTable" class="btn btn-warning"><i class="fas fa-eraser me-2"></i>Limpiar Tabla</button>
+          </div>
+
+          <div style="max-height: 520px; overflow:auto;">
+            <table id="dataTable" class="table table-bordered table-hover">
+              <thead>
+                <tr>
+                  <th>NEW_USER_SUCURSAL</th>
+                  <th>NEW_USER_CODE</th>
+                  <th>NEW_USER_NAME</th>
+                  <th>NEW_USER_EMAIL</th>
+                  <th>NEW_USER_PASS</th>
+                  <th>NEW_USER_TIPO</th>
+                  <th>NEW_USER_COUNTER_ROL</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2) Estado + 3) Ejecutar -->
+  <div class="row g-4 mb-4">
+    <div class="col-lg-6">
+      <div class="card">
+        <div class="card-body">
+          <h5 class="card-title"><i class="fas fa-tasks me-2 text-primary"></i>2) Estado</h5>
+
+          <div class="mb-2">
+            <span class="text-muted">Job ID:</span> <span id="jobId" class="mono fw-medium"></span>
+          </div>
+          <div class="mb-2">
+            <span class="text-muted">Estado:</span> <span id="status" class="badge bg-secondary">-</span>
+          </div>
+          <div class="mb-3">
+            <span class="text-muted">Progreso:</span> <span id="progress" class="mono fw-medium">-</span>
+          </div>
+
+          <div id="results" class="mt-2"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-6">
+      <div class="card">
+        <div class="card-body">
+          <h5 class="card-title"><i class="fas fa-play me-2 text-primary"></i>3) Ejecutar</h5>
+
+          <div class="mb-3">
+            <label class="form-label">Permisos_modulos</label>
+            <select id="permisosFile" class="form-select" required></select>
+          </div>
+
+          <div class="form-check mb-2">
+            <input id="autoCreate" class="form-check-input" type="checkbox" checked>
+            <label class="form-check-label">AUTO_CREATE (crear usuarios)</label>
+          </div>
+
+          <div class="form-check mb-3">
+            <input id="headless" class="form-check-input" type="checkbox" checked>
+            <label class="form-check-label">HEADLESS</label>
+          </div>
+
+          <button id="btnRun" class="btn btn-primary w-100">
+            <i class="fas fa-rocket me-2"></i>Iniciar Job
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4) Gestión de permisos -->
+  <div class="card">
+    <div class="card-body">
+      <div class="d-flex align-items-center justify-content-between mb-3">
+        <h5 class="card-title m-0"><i class="fas fa-shield-alt me-2 text-primary"></i>4) Gestión de Permisos</h5>
+        <div class="d-flex gap-2">
+          <button class="btn btn-outline-secondary btn-sm" id="btnReloadTemplates">
+            <i class="fas fa-sync-alt me-1"></i>Refrescar
+          </button>
+          <button class="btn btn-outline-primary btn-sm" id="btnNewTemplate">
+            <i class="fas fa-plus me-1"></i>Nuevo (clonar títulos)
+          </button>
+        </div>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-md-4">
+          <label class="form-label">Permisos Módulos</label>
+          <select id="tplList" class="form-select"></select>
+
+          <div class="d-flex gap-2 mt-3">
+            <button class="btn btn-sm btn-outline-primary w-100" id="btnEdit"><i class="fas fa-edit me-1"></i>Editar</button>
+            <button class="btn btn-sm btn-outline-danger w-100" id="btnDelete"><i class="fas fa-trash-alt me-1"></i>Eliminar</button>
+          </div>
+        </div>
+
+        <div class="col-md-8">
+          <label class="form-label">Vista Previa</label>
+          <div id="tplView" class="bg-white border rounded p-3">
+            <p class="text-muted text-center mb-0">(selecciona un template para ver su contenido)</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Modal editor -->
+<div class="modal fade" id="editorModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fas fa-code me-2"></i>Editor de Permisos</h5>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">Nombre del Template</label>
+          <input id="editFileName" class="form-control mono" disabled/>
+          <input type="hidden" id="editFullFileName"/>
+        </div>
+
+        <div style="max-height: 520px; overflow:auto;">
+          <table id="editTable" class="table table-striped table-hover">
+            <thead>
+              <tr>
+                <th>Título</th>
+                <th class="text-center"><input type="checkbox" class="form-check-input" id="editSelectAllActivo"> Activo</th>
+                <th class="text-center"><input type="checkbox" class="form-check-input" id="editSelectAllEscritura"> Escritura</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="form-text mt-2">Marca/desmarca y guarda.</div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
+        <button class="btn btn-primary" id="btnSaveJson"><i class="fas fa-save me-1"></i>Guardar Cambios</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal nuevo -->
+<div class="modal fade" id="newModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fas fa-file-alt me-2"></i>Nuevo Template</h5>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">Nombre del Template</label>
+          <input id="newName" class="form-control" placeholder="ej: OPE_COM_NOCHE"/>
+          <div class="form-text">Se guardará como <span class="mono">AAAAMMDD_HHMMSS_nombre.json</span></div>
+        </div>
+
+        <div style="max-height: 520px; overflow:auto;">
+          <table id="newTable" class="table table-striped table-hover">
+            <thead>
+              <tr>
+                <th>Título</th>
+                <th class="text-center"><input type="checkbox" class="form-check-input" id="newSelectAllActivo"> Activo</th>
+                <th class="text-center"><input type="checkbox" class="form-check-input" id="newSelectAllEscritura"> Escritura</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="form-text mt-2">Este “Nuevo” clona los títulos del template seleccionado.</div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-primary" id="btnCreateTpl"><i class="fas fa-plus me-1"></i>Crear Template</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal para editar celda -->
+<div class="modal fade" id="cellEditModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Editar Valor</h5>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input id="cellEditInput" class="form-control" type="text">
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-primary" id="btnSaveCell">Guardar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  let pollTimer = null;
+  let currentJobId = null;
+
+  // ---------------- API helpers ----------------
+  async function api(url, opts={}) {
+    const r = await fetch(url, opts);
+    const t = await r.text();
+    try { return JSON.parse(t); } catch { return { ok:false, error:t }; }
+  }
+
+  function niceName(f) {
+    return String(f || "").replace(/^\d+_/, '').replace(/\.json$/, '');
+  }
+
+  async function loadPermisosTemplatesInto(selectId) {
+    const r = await api("/api/templates/permisos");
+    const sel = $(selectId);
+    sel.innerHTML = "";
+    if (!r.ok) {
+      sel.innerHTML = `<option value="">(error cargando templates)</option>`;
+      return;
+    }
+    sel.innerHTML = r.files.map(f => `<option value="${f}">${niceName(f)}</option>`).join("");
+  }
+
+  async function refreshTplList() {
+    await loadPermisosTemplatesInto("tplList");
+    await loadPermisosTemplatesInto("permisosFile");
+    $("tplView").innerHTML = '<p class="text-muted text-center mb-0">Selecciona un template para ver su contenido.</p>';
+  }
+
+  // ---------------- JOB status ----------------
+  async function showJob(jobId) {
+    const r = await api(`/api/jobs/${jobId}`);
+    if (!r.ok) return;
+
+    const job = r.job;
+    $("jobId").textContent = job.id || "";
+    $("progress").textContent = `${job.doneRows || 0}/${job.totalRows || 0}`;
+
+    $("status").textContent = job.status || "-";
+    $("status").className = "badge " + (
+      job.status === "done" ? "bg-success" :
+      job.status === "running" ? "bg-primary" :
+      job.status === "error" ? "bg-danger" : "bg-secondary"
+    );
+
+    const div = $("results");
+    div.innerHTML = "";
+
+    if (job.error) {
+      div.innerHTML += `<div class="alert alert-danger rounded-3">${job.error}</div>`;
+    }
+
+    if (job.results && job.results.length) {
+      const rows = job.results.map(x => {
+        const badge = x.status === "ok" ? "success" : (x.status === "error" ? "danger" : (x.status === "running" ? "primary" : "secondary"));
+        const err = x.error ? `<div class="small text-danger mt-2 mono">${x.error}</div>` : "";
+        const rowDir = x.rowDir ? `<div class="small text-muted mono mt-2">${x.rowDir}</div>` : "";
+
+        return `
+          <div class="border rounded p-3 mb-3 bg-white shadow-sm">
+            <div class="d-flex align-items-center justify-content-between gap-2">
+              <div>
+                <span class="badge bg-${badge}">${String(x.status || "").toUpperCase()}</span>
+                <span class="mono ms-2">#${x.index}</span>
+                <b class="ms-2">${x.code || ""}</b>
+              </div>
+              <div class="d-flex gap-2">
+                <button class="btn btn-sm btn-outline-dark" onclick="openLog('${job.id}', ${x.index})">
+                  <i class="fas fa-file-lines me-1"></i>Ver Log
+                </button>
+              </div>
+            </div>
+            ${rowDir}
+            ${err}
+          </div>
+        `;
+      }).join("");
+
+      div.innerHTML = rows;
+    }
+
+    if (job.status === "done" || job.status === "error") {
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  async function openLog(jobId, rowIndex) {
+    const r = await fetch(`/api/jobs/${jobId}/row/${rowIndex}/log`);
+    const txt = await r.text();
+    const w = window.open("", "_blank");
+    w.document.write(`<pre style="white-space:pre-wrap; font-family: ui-monospace, monospace; background:#f8f9fa; padding:20px;">${txt.replace(/</g,"&lt;")}</pre>`);
+    w.document.title = `Log Job ${jobId} - Fila ${rowIndex}`;
+  }
+  window.openLog = openLog;
+
+  // ---------------- DATA table ----------------
+  const headers = ['NEW_USER_SUCURSAL','NEW_USER_CODE','NEW_USER_NAME','NEW_USER_EMAIL','NEW_USER_PASS','NEW_USER_TIPO','NEW_USER_COUNTER_ROL'];
+  const TIPOS_USUARIO = ['BRANCH','COUNTER','ADMINISTRADOR'];
+  const ROLES_COUNTER = ['MOSTRADOR','CAJA','GERENTE','ALMACÉN / INVENTARIO'];
+
+  function addDataRow(values = new Array(headers.length).fill('')) {
+    const tbody = $("dataTable").querySelector('tbody');
+    const tr = document.createElement('tr');
+
+    // SUCURSAL (input libre)
+    const tdSucursal = document.createElement('td');
+    const inputSucursal = document.createElement('input');
+    inputSucursal.type = 'text';
+    inputSucursal.className = 'form-control';
+    inputSucursal.placeholder = 'Ej: ZONAL BOLOGNESI';
+    inputSucursal.value = values[0] || '';
+    tdSucursal.appendChild(inputSucursal);
+
+    // CODE
+    const tdCode = document.createElement('td');
+    const inputCode = document.createElement('input');
+    inputCode.type = 'text';
+    inputCode.className = 'form-control mono';
+    inputCode.value = values[1] || '';
+    tdCode.appendChild(inputCode);
+
+    // NAME
+    const tdName = document.createElement('td');
+    const inputName = document.createElement('input');
+    inputName.type = 'text';
+    inputName.className = 'form-control';
+    inputName.value = values[2] || '';
+    tdName.appendChild(inputName);
+
+    // EMAIL
+    const tdEmail = document.createElement('td');
+    const inputEmail = document.createElement('input');
+    inputEmail.type = 'text';
+    inputEmail.className = 'form-control mono';
+    inputEmail.value = values[3] || '';
+    tdEmail.appendChild(inputEmail);
+
+    // PASS
+    const tdPass = document.createElement('td');
+    const inputPass = document.createElement('input');
+    inputPass.type = 'text';
+    inputPass.className = 'form-control mono';
+    inputPass.value = values[4] || '';
+    tdPass.appendChild(inputPass);
+
+    // TIPO
+    const tdTipo = document.createElement('td');
+    const selectTipo = document.createElement('select');
+    selectTipo.className = 'form-select';
+    selectTipo.innerHTML = TIPOS_USUARIO.map(t => `<option value="${t}" ${t === values[5] ? 'selected' : ''}>${t}</option>`).join('');
+    tdTipo.appendChild(selectTipo);
+
+    // ROL
+    const tdRol = document.createElement('td');
+    function renderRol() {
+      tdRol.innerHTML = '';
+      const tipo = selectTipo.value;
+      if (tipo === 'COUNTER' || tipo === 'ADMINISTRADOR') {
+        const selectRol = document.createElement('select');
+        selectRol.className = 'form-select';
+        selectRol.innerHTML = [''].concat(ROLES_COUNTER).map(r =>
+          `<option value="${r}" ${r === values[6] ? 'selected' : ''}>${r}</option>`
+        ).join('');
+        tdRol.appendChild(selectRol);
+      } else {
+        tdRol.innerHTML = `<span class="text-muted small">(no aplica)</span>`;
+      }
+    }
+    selectTipo.addEventListener('change', renderRol);
+    renderRol();
+
+    // Acciones
+    const tdAcciones = document.createElement('td');
+    const btnRemove = document.createElement('button');
+    btnRemove.className = 'btn btn-sm btn-danger';
+    btnRemove.innerHTML = '<i class="fas fa-trash"></i>';
+    btnRemove.addEventListener('click', () => tr.remove());
+    tdAcciones.appendChild(btnRemove);
+
+    tr.appendChild(tdSucursal);
+    tr.appendChild(tdCode);
+    tr.appendChild(tdName);
+    tr.appendChild(tdEmail);
+    tr.appendChild(tdPass);
+    tr.appendChild(tdTipo);
+    tr.appendChild(tdRol);
+    tr.appendChild(tdAcciones);
+
+    tbody.appendChild(tr);
+  }
+
+  $("btnAddManualRow").addEventListener("click", () => addDataRow());
+  $("btnClearTable").addEventListener("click", () => {
+    if (!confirm("¿Seguro de limpiar la tabla?")) return;
+    $("dataTable").querySelector('tbody').innerHTML = '';
+    $("previewExcel").value = '';
+  });
+
+  // Cargar excel a tabla
+  $("previewExcel").addEventListener("change", async () => {
+    const file = $("previewExcel").files[0];
+    if (!file) return;
+
+    const data = await file.arrayBuffer();
+    const workbook = XLSX.read(data, { type: "array" });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+    const fileHeaders = json[0] || [];
+    if (fileHeaders.length !== headers.length || !headers.every((h, i) => fileHeaders[i] === h)) {
+      alert("Los headers del Excel no coinciden con los esperados.");
+      return;
+    }
+
+    const tbody = $("dataTable").querySelector('tbody');
+    tbody.innerHTML = '';
+    json.slice(1).forEach(row => addDataRow(row));
+  });
+
+  // ---------------- RUN JOB ----------------
+  $("btnRun").addEventListener("click", async () => {
+    if (!$("permisosFile").value) return alert("Selecciona un template de permisos.");
+
+    // leer tabla
+    const data = [];
+    $("dataTable").querySelectorAll("tbody tr").forEach(tr => {
+      const tds = tr.children;
+
+      const suc = tds[0].querySelector("input")?.value ?? "";
+      const code = tds[1].querySelector("input")?.value ?? "";
+      const name = tds[2].querySelector("input")?.value ?? "";
+      const email = tds[3].querySelector("input")?.value ?? "";
+      const pass = tds[4].querySelector("input")?.value ?? "";
+      const tipo = tds[5].querySelector("select")?.value ?? "";
+      const rolSel = tds[6].querySelector("select");
+      const rol = rolSel ? (rolSel.value ?? "") : "";
+
+      data.push([suc, code, name, email, pass, tipo, rol]);
+    });
+
+    if (!data.length) return alert("Agrega al menos una fila.");
+
+    // genera excel en navegador
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
+    XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+
+    const wbout = XLSX.write(wb, { bookType: "xlsx", type: "binary" });
+    const blob = new Blob([s2ab(wbout)], { type: "application/octet-stream" });
+
+    const fd = new FormData();
+    fd.append("excel", blob, "data.xlsx");
+    fd.append("permisosFile", $("permisosFile").value);
+    fd.append("autoCreate", $("autoCreate").checked ? "true" : "false");
+    fd.append("headless", $("headless").checked ? "true" : "false");
+
+    $("btnRun").innerHTML = '<i class="fas fa-spinner icon-spin me-2"></i>Iniciando...';
+    $("btnRun").disabled = true;
+
+    const r = await fetch("/api/jobs", { method: "POST", body: fd });
+    const j = await r.json().catch(() => ({}));
+
+    if (!j.ok) {
+      alert(j.error || "Error al crear job");
+      $("btnRun").innerHTML = '<i class="fas fa-rocket me-2"></i>Iniciar Job';
+      $("btnRun").disabled = false;
+      return;
+    }
+
+    currentJobId = j.jobId;
+    await showJob(currentJobId);
+
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(() => showJob(currentJobId), 2000);
+
+    $("btnRun").innerHTML = '<i class="fas fa-rocket me-2"></i>Iniciar Job';
+    $("btnRun").disabled = false;
+  });
+
+  // ---------------- CRUD templates ----------------
+  const editorModal = new bootstrap.Modal(document.getElementById("editorModal"));
+  const newModal = new bootstrap.Modal(document.getElementById("newModal"));
+  const cellEditModal = new bootstrap.Modal(document.getElementById("cellEditModal"));
+
+  $("btnReloadTemplates").addEventListener("click", async () => {
+    $("btnReloadTemplates").innerHTML = '<i class="fas fa-sync-alt icon-spin me-1"></i>Refrescando...';
+    await refreshTplList();
+    $("btnReloadTemplates").innerHTML = '<i class="fas fa-sync-alt me-1"></i>Refrescar';
+  });
+
+  $("tplList").addEventListener("change", async () => {
+    const f = $("tplList").value;
+    if (!f) {
+      $("tplView").innerHTML = '<p class="text-muted text-center mb-0">Selecciona un template para ver su contenido.</p>';
+      return;
+    }
+    const r = await api(`/api/templates/permisos/${encodeURIComponent(f)}`);
+    if (!r.ok) {
+      $("tplView").innerHTML = `<p class="text-danger text-center mb-0">${r.error || "Error"}</p>`;
+      return;
+    }
+    const data = r.data || [];
+    let html = '<table class="table table-striped table-hover mb-0"><thead><tr><th>Título</th><th class="text-center">Activo</th><th class="text-center">Escritura</th></tr></thead><tbody>';
+    data.forEach(item => {
+      html += `<tr>
+        <td>${item.title}</td>
+        <td class="text-center">${item.activo ? '<i class="fas fa-check text-success"></i>' : '<i class="fas fa-times text-danger"></i>'}</td>
+        <td class="text-center">${item.escritura ? '<i class="fas fa-check text-success"></i>' : '<i class="fas fa-times text-danger"></i>'}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    $("tplView").innerHTML = html;
+  });
+
+  function addEditRow(tbody, title, activo, escritura) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${title}</td>
+      <td class="text-center"><input type="checkbox" class="form-check-input activo" ${activo ? 'checked' : ''}></td>
+      <td class="text-center"><input type="checkbox" class="form-check-input escritura" ${escritura ? 'checked' : ''}></td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  $("btnEdit").addEventListener("click", async () => {
+    const f = $("tplList").value;
+    if (!f) return alert("Selecciona un template.");
+
+    const r = await api(`/api/templates/permisos/${encodeURIComponent(f)}`);
+    if (!r.ok) return alert(r.error || "Error");
+
+    $("editFileName").value = niceName(f);
+    $("editFullFileName").value = f;
+
+    const tbody = $("editTable").querySelector("tbody");
+    tbody.innerHTML = "";
+    (r.data || []).forEach(item => addEditRow(tbody, item.title, item.activo, item.escritura));
+
+    $("editSelectAllActivo").checked = false;
+    $("editSelectAllEscritura").checked = false;
+
+    editorModal.show();
+  });
+
+  $("editSelectAllActivo").addEventListener("change", (e) => {
+    document.querySelectorAll("#editTable .activo").forEach(cb => cb.checked = e.target.checked);
+  });
+  $("editSelectAllEscritura").addEventListener("change", (e) => {
+    document.querySelectorAll("#editTable .escritura").forEach(cb => cb.checked = e.target.checked);
+  });
+
+  $("btnSaveJson").addEventListener("click", async () => {
+    const f = $("editFullFileName").value;
+    const data = [];
+
+    $("editTable").querySelectorAll("tbody tr").forEach(tr => {
+      const title = tr.querySelector("td:first-child").textContent.trim();
+      data.push({
+        title,
+        activo: tr.querySelector(".activo").checked,
+        escritura: tr.querySelector(".escritura").checked
+      });
+    });
+
+    const r = await api(`/api/templates/permisos/${encodeURIComponent(f)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data })
+    });
+
+    if (!r.ok) return alert(r.error || "Error al guardar");
+    editorModal.hide();
+
+    await refreshTplList();
+    $("tplList").value = f;
+    $("tplList").dispatchEvent(new Event("change"));
+  });
+
+  $("btnDelete").addEventListener("click", async () => {
+    const f = $("tplList").value;
+    if (!f) return alert("Selecciona un template.");
+    if (!confirm(`¿Eliminar "${niceName(f)}"?`)) return;
+
+    const r = await api(`/api/templates/permisos/${encodeURIComponent(f)}`, { method: "DELETE" });
+    if (!r.ok) return alert(r.error || "Error al eliminar");
+
+    await refreshTplList();
+  });
+
+  function addNewRow(tbody, title, activo, escritura) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${title}</td>
+      <td class="text-center"><input type="checkbox" class="form-check-input activo" ${activo ? 'checked' : ''}></td>
+      <td class="text-center"><input type="checkbox" class="form-check-input escritura" ${escritura ? 'checked' : ''}></td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  $("btnNewTemplate").addEventListener("click", async () => {
+    const baseFile = $("tplList").value || $("permisosFile").value;
+    if (!baseFile) return alert("No hay template base para clonar títulos.");
+
+    const r = await api(`/api/templates/permisos/${encodeURIComponent(baseFile)}`);
+    if (!r.ok) return alert(r.error || "Error cargando template base");
+
+    $("newName").value = "";
+
+    const tbody = $("newTable").querySelector("tbody");
+    tbody.innerHTML = "";
+
+    (r.data || []).forEach(item => addNewRow(tbody, item.title, false, false));
+
+    $("newSelectAllActivo").checked = false;
+    $("newSelectAllEscritura").checked = false;
+
+    newModal.show();
+  });
+
+  $("newSelectAllActivo").addEventListener("change", (e) => {
+    document.querySelectorAll("#newTable .activo").forEach(cb => cb.checked = e.target.checked);
+  });
+  $("newSelectAllEscritura").addEventListener("change", (e) => {
+    document.querySelectorAll("#newTable .escritura").forEach(cb => cb.checked = e.target.checked);
+  });
+
+  $("btnCreateTpl").addEventListener("click", async () => {
+    const name = $("newName").value.trim();
+    if (!name) return alert("Ingresa nombre.");
+
+    const data = [];
+    $("newTable").querySelectorAll("tbody tr").forEach(tr => {
+      const title = tr.querySelector("td:first-child").textContent.trim();
+      data.push({
+        title,
+        activo: tr.querySelector(".activo").checked,
+        escritura: tr.querySelector(".escritura").checked
+      });
+    });
+
+    const r = await api("/api/templates/permisos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, data })
+    });
+
+    if (!r.ok) return alert(r.error || "Error al crear");
+
+    newModal.hide();
+    await refreshTplList();
+    $("tplList").value = r.filename;
+    $("tplList").dispatchEvent(new Event("change"));
+  });
+
+  // Modal para editar celda en tabla
+  let currentInput = null;
+  $("dataTable").addEventListener("dblclick", (e) => {
+    const input = e.target;
+    if (input.tagName === "INPUT" && input.type === "text") {
+      currentInput = input;
+      $("cellEditInput").value = input.value;
+      cellEditModal.show();
+    }
+  });
+
+  $("btnSaveCell").addEventListener("click", () => {
+    if (currentInput) {
+      currentInput.value = $("cellEditInput").value;
+      currentInput = null;
+    }
+    cellEditModal.hide();
+  });
+
+  // init
+  (async () => {
+    await refreshTplList();
+    addDataRow(); // 1 fila por defecto
+  })();
+
+  function s2ab(s) {
+    const buf = new ArrayBuffer(s.length);
+    const view = new Uint8Array(buf);
+    for (let i = 0; i < s.length; i++) view[i] = s.charCodeAt(i) & 0xFF;
+    return buf;
+  }
+</script>
+</body>
+</html
