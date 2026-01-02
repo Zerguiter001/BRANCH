@@ -1,0 +1,28 @@
+los 3 archivos trabajan en conjunto.
+
+Acabo de revisar tu configuración y notarás que agregué el comando start a tu 
+package.json
+ para que npm run start funcione correctamente.
+
+Así es como se conectan cuando ejecutas ese comando:
+
+server.js
+ (El Cerebro 🧠):
+Al hacer npm run start, se ejecuta este archivo.
+Inicia un servidor web en el puerto 3008.
+Es el encargado de servir la página web y de recibir las órdenes.
+index.html
+ (La Cara ☺):
+Es la interfaz que verás en tu navegador (http://localhost:3008).
+Cuando subes el Excel y das click en "Iniciar Job", le envía esa información a 
+server.js
+.
+scrape_html.js
+ (El Músculo 💪):
+Este archivo está "dormido" hasta que lo necesitan.
+Cuando 
+server.js
+ recibe la orden de iniciar un trabajo, despierta a 
+scrape_html.js
+ (en un proceso secundario).
+Este script es el que abre el navegador real, entra a la web destino y crea los usuarios uno por uno.
