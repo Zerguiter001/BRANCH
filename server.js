@@ -14,7 +14,7 @@ const crypto = require("crypto");
 const app = express();
 app.use(express.json({ limit: "10mb" }));
 
-const PORT = Number(process.env.PORT || 3008);
+const PORT = Number(process.env.PORT || 3040);
 const CWD = process.cwd();
 
 const PERMISOS_DIR = path.join(CWD, "permisos_modulos");

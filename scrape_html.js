@@ -1,4 +1,24 @@
+#!/usr/bin/env node
 // scrape_html.js
+// --------------------------------------------------------------------------------------------
+// LINKS (Docs oficiales):
+// - Puppeteer: https://pptr.dev/
+// - dotenv: https://github.com/motdotla/dotenv
+// - fs-extra: https://github.com/jprichardson/node-fs-extra
+// - xlsx: https://github.com/SheetJS/sheetjs
+//
+// NOTA SERVIDOR (Linux):
+// - Recomendado: usar Chromium del sistema y evitar download pesado de Puppeteer.
+//   Exporta: PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser  (o /usr/bin/chromium)
+// - Dependencias típicas (Ubuntu/Debian) para Chromium headless:
+//   sudo apt-get update && sudo apt-get install -y \
+//     chromium-browser chromium-codecs-ffmpeg \
+//     fonts-liberation libasound2 libatk-bridge2.0-0 libatk1.0-0 libc6 libcairo2 libcups2 \
+//     libdbus-1-3 libexpat1 libfontconfig1 libgbm1 libgcc1 libglib2.0-0 libgtk-3-0 \
+//     libnspr4 libnss3 libpango-1.0-0 libpangocairo-1.0-0 libstdc++6 libx11-6 \
+//     libx11-xcb1 libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 \
+//     libxi6 libxrandr2 libxrender1 libxss1 libxtst6 ca-certificates lsb-release wget xdg-utils
+//
 // --------------------------------------------------------------------------------------------
 // FIX REAL AUTOCOMPLETE (Sucursal):
 // - NO usamos TAB para "confirmar" (en tu UI TAB no selecciona, solo cambia foco).
@@ -22,9 +42,12 @@
 // - Uso de CREATE_WAIT_MS (espera configurable tras crear)
 // --------------------------------------------------------------------------------------------
 
-require("dotenv").config();
 const fs = require("fs-extra");
 const path = require("path");
+
+// ✅ dotenv desde el mismo directorio del script (evita problemas con PM2/cron)
+require("dotenv").config({ path: path.join(__dirname, ".env") });
+
 const puppeteer = require("puppeteer");
 const readline = require("readline");
 const XLSX = require("xlsx"); // ✅ Excel masivo
@@ -60,11 +83,21 @@ function norm(s) {
 }
 
 /* -------------------------------------------------------------------------- */
+/* ✅ ROOT estable (útil en servidor)                                          */
+/* -------------------------------------------------------------------------- */
+
+const ROOT = process.env.WORKDIR
+  ? path.resolve(process.env.WORKDIR)
+  : process.env.APP_ROOT
+  ? path.resolve(process.env.APP_ROOT)
+  : process.cwd();
+
+/* -------------------------------------------------------------------------- */
 /* ✅ LOGGING (archivo + consola filtrada)                                     */
 /* -------------------------------------------------------------------------- */
 
 const RUN_ID = ts();
-const LOG_DIR = path.join(process.cwd(), process.env.LOG_DIR || "LOGS");
+const LOG_DIR = path.join(ROOT, process.env.LOG_DIR || "LOGS");
 const RUN_LOG_DIR = path.join(LOG_DIR, `run_${RUN_ID}`);
 const LOG_FILE = path.join(RUN_LOG_DIR, "run.log");
 
@@ -107,11 +140,12 @@ function log(level, msg, extra) {
   logToFile(line).catch(() => {});
 
   // A consola solo si corresponde
-  if (shouldPrint(level)) {
-    if (level === "warn") ORIG_CONSOLE.warn(base);
-    else if (level === "error") ORIG_CONSOLE.error(base);
-    else ORIG_CONSOLE.log(base);
-  }
+if (shouldPrint(level)) {
+  if (level === "warn") ORIG_CONSOLE.warn(line);
+  else if (level === "error") ORIG_CONSOLE.error(line);
+  else ORIG_CONSOLE.log(line);
+}
+
 }
 
 // Captura console.log/warn/error del script (todo a archivo, consola filtrada)
@@ -128,7 +162,7 @@ function important(msg, extra) {
 /* -------------------------------------------------------------------------- */
 
 function readUsersFromExcel(excelPath) {
-  const full = path.isAbsolute(excelPath) ? excelPath : path.join(process.cwd(), excelPath);
+  const full = path.isAbsolute(excelPath) ? excelPath : path.join(ROOT, excelPath);
   if (!fs.existsSync(full)) throw new Error(`No existe Excel: ${full}`);
 
   const wb = XLSX.readFile(full, { cellDates: true });
@@ -1886,7 +1920,7 @@ async function processOneUserFlow(page, {
   await snapshot(page, outDir, "crearUsuario_lleno");
 
   // ----------------------
-  // ✅ MÓDULOS (SOLO 1 VEZ)  (tu mismo comentario original)
+  // ✅ MÓDULOS (SOLO 1 VEZ)
   // ----------------------
   await clickModulosButton(page, { timeout: 25000 });
   await sleep(500);
@@ -2035,12 +2069,12 @@ async function processOneUserFlow(page, {
   const VIEWPORT_HEIGHT = parseInt(process.env.VIEWPORT_HEIGHT || "864", 10);
   const DEVICE_SCALE_FACTOR = parseFloat(process.env.DEVICE_SCALE_FACTOR || "1");
 
-  const PERMISOS_DIR = path.join(process.cwd(), "permisos_modulos");
+  const PERMISOS_DIR = path.join(ROOT, "permisos_modulos");
   const envFile = (process.env.PERMISOS_FILE || "").trim();
   const permisosFileName = envFile || "branch.json";
   const permisosPath = path.join(PERMISOS_DIR, path.basename(permisosFileName));
 
-  const CAMPOS_DIR = path.join(process.cwd(), "permisos_campossap");
+  const CAMPOS_DIR = path.join(ROOT, "permisos_campossap");
   const camposEnvFile = (process.env.CAMPOS_FILE || "").trim();
   const camposFileName = camposEnvFile || "branch.json";
   const camposPath = path.join(CAMPOS_DIR, path.basename(camposFileName));
@@ -2048,7 +2082,7 @@ async function processOneUserFlow(page, {
   if (!USER || !PASS) throw new Error("Faltan LOGIN_USER o LOGIN_PASS en tu .env");
 
   // ✅ salida por run
-  const OUT_ROOT = path.join(process.cwd(), "HTML");
+  const OUT_ROOT = path.join(ROOT, "HTML");
   const outDir = path.join(OUT_ROOT, `run_${RUN_ID}`);
   await fs.ensureDir(OUT_ROOT);
   await fs.ensureDir(outDir);
@@ -2059,14 +2093,20 @@ async function processOneUserFlow(page, {
   console.log("📁 Ruta campos  :", camposPath);
   important("📁 Output", { outDir });
 
+  // ✅ En servidor, usa Chromium del sistema si se define
+  const PUPPETEER_EXECUTABLE_PATH = String(process.env.PUPPETEER_EXECUTABLE_PATH || "").trim() || null;
+
   const browser = await puppeteer.launch({
     headless: HEADLESS,
     ignoreHTTPSErrors: true,
+    executablePath: PUPPETEER_EXECUTABLE_PATH || undefined,
     defaultViewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT, deviceScaleFactor: DEVICE_SCALE_FACTOR },
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--disable-software-rasterizer",
       `--window-size=${VIEWPORT_WIDTH},${VIEWPORT_HEIGHT}`,
       "--start-maximized",
     ],
@@ -2076,159 +2116,390 @@ async function processOneUserFlow(page, {
   page.setDefaultNavigationTimeout(120000);
   await page.setViewport({ width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT, deviceScaleFactor: DEVICE_SCALE_FACTOR });
 
-  await page.setUserAgent(
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+   await page.setUserAgent(
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
   );
 
-  // Browser logs: solo warning/error al log
-  page.on("pageerror", (e) => console.log("PAGEERROR:", e.message));
-  page.on("console", (msg) => {
-    const t = msg.type();
-    if (t === "error" || t === "warning") console.log("BROWSER:", t, msg.text());
-  });
+  /* -------------------------------------------------------------------------- */
+  /* ✅ EXTRA SERVER FIXES: Chromium path + request rewrite (como Playwright)    */
+  /* -------------------------------------------------------------------------- */
 
-  important("🌐 Abriendo URL", { BASE_URL });
-  await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
-
-  // Login
-  await page.waitForSelector("#usuario", { timeout: 60000 });
-  await typeSlow(page, "#usuario", USER, { delay: 20 });
-
-  await page.waitForSelector('input[type="password"]', { timeout: 60000 });
-  await typeSlow(page, 'input[type="password"]', PASS, { delay: 20 });
-
-  await page.click('button[type="submit"]');
-  await sleep(900);
-
-  // Detectar 2FA
-  let needs2FA = false;
-  try {
-    await page.waitForFunction(() => {
-      const m = document.getElementById("TwoStepsModal-TwoSteps");
-      return !!m && m.classList.contains("show");
-    }, { timeout: 8000 });
-    needs2FA = true;
-  } catch {}
-
-if (needs2FA) {
-  important("🔐 2FA detectado.");
-
-  const preset = String(process.env.OTP_CODE || "").trim();
-  let code = preset;
-
-  if (!code) {
-    // Si corre como JOB desde server, NO queremos quedarnos esperando stdin
-    if (!process.stdin.isTTY) {
-      throw new Error("2FA detectado pero no se envió OTP_CODE. Ponlo en la UI (OTP 2FA).");
+  async function resolveExecutablePathMaybe() {
+    // 1) Si lo pasas por env
+    const envPath =
+      process.env.CHROME_PATH ||
+      process.env.PUPPETEER_EXECUTABLE_PATH ||
+      process.env.CHROMIUM_PATH;
+    if (envPath && fs.existsSync(envPath)) {
+      important("✅ Usando CHROME_PATH desde env", { envPath });
+      return envPath;
     }
-    code = (await ask("Código 2FA: ")).trim();
+
+    // 2) Si Playwright está instalado (tu branchservice ya lo usa)
+    try {
+      const { chromium } = require("playwright");
+      const p = chromium.executablePath();
+      if (p && fs.existsSync(p)) {
+        important("✅ Usando Chromium de Playwright", { executablePath: p });
+        return p;
+      }
+    } catch {}
+
+    // 3) Dejar que Puppeteer decida (solo funciona si descargó Chromium)
+    important("ℹ️ Usando Chromium default de Puppeteer (si existe).");
+    return undefined;
   }
 
-  const otpSel = '#TwoStepsModal-TwoSteps input[type="text"]';
-  await page.waitForSelector(otpSel, { timeout: 30000 });
-  await typeSlow(page, otpSel, code, { delay: 40 });
-  await page.keyboard.press("Enter");
-  await sleep(1100);
-}
-
-
-  // Ir a Admin. de usuarios
-  const adminCardSel = 'span[routerlink="/adminUsers"]';
-  await page.waitForSelector(adminCardSel, { timeout: 60000 });
-  await page.click(adminCardSel);
-
-  await page.waitForFunction(
-    () => window.location.pathname.includes("/adminUsers") || window.location.href.includes("/adminUsers"),
-    { timeout: 60000 }
-  );
-
-  await sleep(900);
-  await snapshot(page, outDir, "adminUsers");
-
-  // ✅ MODO MASIVO (Excel) - SIN borrar tu lógica
-  const EXCEL_MASIVO = String(process.env.EXCEL_MASIVO || "false").toLowerCase() === "true";
-  const excelFile = process.env.EXCEL_FILE || "EXCEL/usuarios.xlsx";
-
-  if (EXCEL_MASIVO) {
-    const { users, excelFullPath, sheetName, totalRows } = readUsersFromExcel(excelFile);
-    important("📄 Excel leído", { excelFullPath, sheetName, totalRows, usuarios_validos: users.length });
-
-    if (!users.length) {
-      throw new Error("Tu Excel no tiene filas válidas. Asegúrate de llenar todas las columnas requeridas.");
+  async function installRequestRewrite(page) {
+    const enabled = String(process.env.ROUTE_ENABLED || "false").toLowerCase() === "true";
+    if (!enabled) {
+      important("ℹ️ ROUTE_ENABLED=false -> no se reescriben requests.");
+      return;
     }
 
-    let okCount = 0;
-    let failCount = 0;
+    const fromBase = (process.env.ROUTE_FROM_BASE || "").trim().replace(/\/+$/, "");
+    const toBase = (process.env.ROUTE_TO_BASE || "").trim().replace(/\/+$/, "");
 
-    for (let i = 0; i < users.length; i++) {
-      const u = users[i];
+    if (!fromBase || !toBase) {
+      important("⚠️ ROUTE_ENABLED=true pero falta ROUTE_FROM_BASE o ROUTE_TO_BASE.");
+      return;
+    }
 
-      // Setear ENV por usuario (evita arrastre)
-      process.env.NEW_USER_SUCURSAL = u.NEW_USER_SUCURSAL || "";
-      process.env.NEW_USER_CODE = u.NEW_USER_CODE || "";
-      process.env.NEW_USER_NAME = u.NEW_USER_NAME || "";
-      process.env.NEW_USER_EMAIL = u.NEW_USER_EMAIL || "";
-      process.env.NEW_USER_PASS = u.NEW_USER_PASS || "";
-      process.env.NEW_USER_TIPO = u.NEW_USER_TIPO || "";
-      process.env.NEW_USER_COUNTER_ROL = u.NEW_USER_COUNTER_ROL || "";
+    important("🔀 Request rewrite ON", { fromBase, toBase });
 
-      const userTag = `${u.NEW_USER_CODE}`.replace(/[^\w.-]+/g, "_");
-      const userDir = path.join(outDir, `user_${String(i + 1).padStart(3, "0")}_${userTag}`);
-      await fs.ensureDir(userDir);
+    await page.setRequestInterception(true);
 
-      important(`👤 (${i + 1}/${users.length}) PROCESANDO`, {
-        excelRow: u.index,
-        code: u.NEW_USER_CODE,
-        tipo: u.NEW_USER_TIPO,
-        sucursal: u.NEW_USER_SUCURSAL,
-      });
-
+    page.on("request", (req) => {
       try {
-        await processOneUserFlow(page, {
-          outDir: userDir,
-          permisosPath,
-          camposPath,
-          AUTO_SAVE_CAMPOS,
+        const url = req.url();
+        if (url.startsWith(fromBase)) {
+          const u = new URL(url);
+          const newUrl = toBase + u.pathname + u.search;
+          return req.continue({ url: newUrl });
+        }
+        return req.continue();
+      } catch {
+        try { req.continue(); } catch {}
+      }
+    });
+
+    page.on("requestfailed", (r) => {
+      const f = r.failure();
+      if (f) log("warn", `requestfailed: ${r.url()} => ${f.errorText}`);
+    });
+  }
+
+  async function gotoWithFallback(page, url, fallbackUrl) {
+    try {
+      important("🌐 goto", { url });
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 120000 });
+      return url;
+    } catch (e) {
+      log("warn", "⚠️ goto falló (primario)", { url, err: String(e?.message || e) });
+      if (!fallbackUrl) throw e;
+
+      important("🌐 goto (fallback)", { fallbackUrl });
+      await page.goto(fallbackUrl, { waitUntil: "domcontentloaded", timeout: 120000 });
+      return fallbackUrl;
+    }
+  }
+
+  async function autoLoginPuppeteer(page, email, pass) {
+    const emailSelectors = [
+      'input[type="email"]',
+      'input[name*="mail" i]',
+      'input[id*="mail" i]',
+      'input[placeholder*="mail" i]',
+      'input[placeholder*="correo" i]',
+      'input[placeholder*="email" i]',
+      'input[name*="user" i]',
+      'input[id*="user" i]',
+      'input[placeholder*="usuario" i]',
+    ];
+
+    const passSelectors = [
+      'input[type="password"]',
+      'input[name*="pass" i]',
+      'input[id*="pass" i]',
+      'input[placeholder*="pass" i]',
+      'input[placeholder*="contrase" i]',
+    ];
+
+    const buttonSelectors = [
+      'button[type="submit"]',
+      'button:contains("Iniciar")',
+      'button:contains("Ingresar")',
+      'button:contains("Login")',
+      'button:contains("Sign")',
+      'input[type="submit"]',
+    ];
+
+    const findFirst = async (selectors) => {
+      for (const s of selectors) {
+        const el = await page.$(s);
+        if (el) return { sel: s, el };
+      }
+      return null;
+    };
+
+    await sleep(800);
+
+    const emailEl = await findFirst(emailSelectors);
+    const passEl = await findFirst(passSelectors);
+
+    if (!emailEl || !passEl) {
+      throw new Error(
+        `No encontré inputs login. email=${!!emailEl} pass=${!!passEl}. Ajusta selectores o revisa HTML del login.`
+      );
+    }
+
+    important("🔐 Login inputs", { emailSel: emailEl.sel, passSel: passEl.sel });
+
+    await page.click(emailEl.sel, { clickCount: 3 });
+    await page.keyboard.press("Backspace");
+    await page.type(emailEl.sel, email, { delay: 10 });
+
+    await page.click(passEl.sel, { clickCount: 3 });
+    await page.keyboard.press("Backspace");
+    await page.type(passEl.sel, pass, { delay: 10 });
+
+    // Click submit si hay botón; si no, Enter
+    let clicked = false;
+
+    // puppeteer no soporta :has-text, entonces buscamos por texto con evaluate
+    try {
+      const didClick = await page.evaluate(() => {
+        const norm2 = (s) =>
+          String(s || "")
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .toLowerCase();
+
+        const btns = Array.from(document.querySelectorAll("button,input[type=submit]"));
+        const target = btns.find((b) => {
+          const t = norm2(b.innerText || b.value || b.textContent);
+          return t.includes("iniciar") || t.includes("ingresar") || t.includes("login") || t.includes("entrar");
         });
 
-        okCount++;
-        important(`✅ OK usuario ${userTag}`, { excelRow: u.index });
-      } catch (e) {
-        failCount++;
-        important(`❌ FAIL usuario ${userTag}`, { excelRow: u.index, error: e?.message || String(e) });
-        // snapshot de error
-        try { await snapshot(page, userDir, "ERROR"); } catch {}
+        if (!target) return false;
+        target.click();
+        return true;
+      });
+
+      if (didClick) clicked = true;
+    } catch {}
+
+    if (!clicked) {
+      // fallback: intenta selector submit
+      for (const s of buttonSelectors) {
+        try {
+          const el = await page.$(s);
+          if (el) {
+            await el.click();
+            clicked = true;
+            break;
+          }
+        } catch {}
       }
     }
 
-    important("📌 RESUMEN MASIVO", { ok: okCount, fail: failCount, total: users.length, outDir, log: LOG_FILE });
-
-    if (KEEP_OPEN) {
-      important("🟢 KEEP_OPEN=true -> navegador quedará abierto.");
-      await ask("Presiona ENTER para cerrar el navegador...");
+    if (!clicked) {
+      await page.keyboard.press("Enter");
     }
 
-    await browser.close();
-    return;
+    important("✅ Submit login disparado", { clicked });
   }
 
-  // ✅ MODO NORMAL (1 usuario por .env)
-  await processOneUserFlow(page, {
-    outDir,
-    permisosPath,
-    camposPath,
-    AUTO_SAVE_CAMPOS,
+  async function waitLoginSuccess(page) {
+    // Configurable: si sabes un selector del dashboard, ponlo en env LOGIN_SUCCESS_SELECTOR
+    const successSel = (process.env.LOGIN_SUCCESS_SELECTOR || "").trim();
+    const successUrlInc = (process.env.LOGIN_SUCCESS_URL_INCLUDES || "").trim();
+
+    // Si no configuras nada, intentamos heurística: desaparece form login o aparece navbar / logout
+    const timeout = 120000;
+
+    if (successSel) {
+      await page.waitForSelector(successSel, { timeout });
+      return;
+    }
+
+    await page.waitForFunction(
+      (successUrlInc) => {
+        const u = location.href;
+        if (successUrlInc && u.includes(successUrlInc)) return true;
+
+        const norm2 = (s) =>
+          String(s || "")
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .toLowerCase();
+
+        // señales típicas de sesión iniciada
+        const anyLogout =
+          Array.from(document.querySelectorAll("a,button")).some((x) => {
+            const t = norm2(x.innerText || x.textContent);
+            return t.includes("cerrar sesion") || t.includes("logout") || t.includes("salir");
+          });
+
+        const hasNav =
+          document.querySelector(".navbar, nav, app-navbar, header") != null;
+
+        // señales de login aún presente
+        const stillHasPass = document.querySelector('input[type="password"]') != null;
+
+        return (anyLogout || hasNav) && !stillHasPass;
+      },
+      { timeout },
+      successUrlInc
+    );
+  }
+
+  /* -------------------------------------------------------------------------- */
+  /* ✅ RE-LAUNCH browser con executablePath si hace falta (server)              */
+  /* -------------------------------------------------------------------------- */
+
+  // Cerramos el browser actual (porque lo lanzaste arriba sin executablePath)
+  // y relanzamos con path estable si aplica.
+  const execPath = await resolveExecutablePathMaybe();
+
+  await browser.close().catch(() => {});
+
+  const browser2 = await puppeteer.launch({
+    headless: HEADLESS,
+    ignoreHTTPSErrors: true,
+    executablePath: execPath, // ✅ clave para servidor
+    defaultViewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT, deviceScaleFactor: DEVICE_SCALE_FACTOR },
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--ignore-certificate-errors",
+      "--ignore-certificate-errors-spki-list",
+      `--window-size=${VIEWPORT_WIDTH},${VIEWPORT_HEIGHT}`,
+      "--start-maximized",
+    ],
   });
 
-  important("✅ Listo (modo normal).", { outDir, log: LOG_FILE });
+  const page2 = await browser2.newPage();
+  page2.setDefaultNavigationTimeout(120000);
+  await page2.setViewport({ width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT, deviceScaleFactor: DEVICE_SCALE_FACTOR });
 
-  if (KEEP_OPEN) {
-    important("🟢 KEEP_OPEN=true -> navegador quedará abierto.");
-    await ask("Presiona ENTER para cerrar el navegador...");
+  // logs de consola del navegador (útil para ver errores de CORS, 401, etc.)
+  page2.on("console", async (msg) => {
+    try {
+      const txt = msg.text();
+      // todo a archivo, filtrado a consola por tu logger
+      log("debug", `[BROWSER:${msg.type()}] ${txt}`);
+    } catch {}
+  });
+  page2.on("pageerror", (err) => log("warn", "pageerror", { err: String(err?.message || err) }));
+
+  // ✅ instalar rewrite antes de navegar
+  await installRequestRewrite(page2);
+
+  const FALLBACK_URL = (process.env.SCRAPE_FALLBACK_URL || process.env.FRONT_URL || "").trim() || null;
+
+  // 1) Ir al login
+  const openedUrl = await gotoWithFallback(page2, BASE_URL, FALLBACK_URL);
+  await snapshot(page2, outDir, "00_open_login");
+
+  // 2) Login
+  important("🔐 Iniciando login...", { openedUrl });
+  await autoLoginPuppeteer(page2, USER, PASS);
+
+  try {
+    await waitLoginSuccess(page2);
+    important("✅ Login OK", { url: await page2.url() });
+  } catch (e) {
+    await snapshot(page2, outDir, "00_login_failed");
+    throw new Error("❌ Login no confirmó éxito. Revisa snapshot 00_login_failed: " + (e?.message || e));
   }
 
-  await browser.close();
-})().catch((err) => {
-  important("💥 Error fatal", { error: err?.message || String(err) });
-  process.exit(1);
+  await snapshot(page2, outDir, "01_after_login");
+
+  /* -------------------------------------------------------------------------- */
+  /* ✅ EJECUCIÓN FLUJO: 1 usuario (env) o masivo (Excel)                        */
+  /* -------------------------------------------------------------------------- */
+
+  const EXCEL_MASIVO = String(process.env.EXCEL_MASIVO || "false").toLowerCase() === "true";
+  const EXCEL_FILE = (process.env.EXCEL_FILE || "").trim();
+
+  // helper: setear env por usuario para reutilizar tus funciones sin reescribirlas
+  async function withUserEnv(userObj, fn) {
+    const keys = [
+      "NEW_USER_SUCURSAL",
+      "NEW_USER_CODE",
+      "NEW_USER_NAME",
+      "NEW_USER_EMAIL",
+      "NEW_USER_PASS",
+      "NEW_USER_TIPO",
+      "NEW_USER_COUNTER_ROL",
+    ];
+
+    const backup = {};
+    for (const k of keys) backup[k] = process.env[k];
+
+    try {
+      for (const k of keys) {
+        if (userObj && userObj[k] !== undefined) process.env[k] = String(userObj[k] ?? "").trim();
+      }
+      return await fn();
+    } finally {
+      for (const k of keys) {
+        if (backup[k] === undefined) delete process.env[k];
+        else process.env[k] = backup[k];
+      }
+    }
+  }
+
+  if (EXCEL_MASIVO) {
+    if (!EXCEL_FILE) throw new Error("EXCEL_MASIVO=true pero falta EXCEL_FILE en .env");
+
+    const { users, excelFullPath, sheetName, totalRows } = readUsersFromExcel(EXCEL_FILE);
+    important("📘 Excel masivo leído", { excelFullPath, sheetName, totalRows, users: users.length });
+
+    if (!users.length) throw new Error("No hay filas válidas en el Excel (revisa headers y campos obligatorios).");
+
+    for (const u of users) {
+      important("👤 Procesando usuario Excel", { row: u.index, code: u.NEW_USER_CODE, email: u.NEW_USER_EMAIL });
+
+      await withUserEnv(u, async () => {
+        try {
+          await processOneUserFlow(page2, { outDir, permisosPath, camposPath, AUTO_SAVE_CAMPOS });
+          important("✅ Usuario OK", { row: u.index, code: u.NEW_USER_CODE });
+        } catch (e) {
+          log("error", "❌ Usuario falló", { row: u.index, err: String(e?.message || e) });
+          await snapshot(page2, outDir, `ERR_user_row_${u.index}`);
+          // sigue con el siguiente (no aborta todo)
+        }
+      });
+    }
+  } else {
+    // Modo normal (solo env)
+    await processOneUserFlow(page2, { outDir, permisosPath, camposPath, AUTO_SAVE_CAMPOS });
+  }
+
+  /* -------------------------------------------------------------------------- */
+  /* ✅ Final                                                                    */
+  /* -------------------------------------------------------------------------- */
+
+  if (KEEP_OPEN) {
+    important("🟡 KEEP_OPEN=true -> dejando browser abierto. CTRL+C para salir.");
+    // mantener vivo
+    // eslint-disable-next-line no-constant-condition
+    while (true) await sleep(1000);
+  } else {
+    await browser2.close().catch(() => {});
+    important("✅ FIN OK (browser cerrado)");
+  }
+})().catch(async (e) => {
+  try {
+    log("error", "💥 ERROR FATAL", { err: String(e?.message || e) });
+  } catch {}
+  process.exitCode = 1;
 });
