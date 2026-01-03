@@ -89,8 +89,8 @@ function norm(s) {
 const ROOT = process.env.WORKDIR
   ? path.resolve(process.env.WORKDIR)
   : process.env.APP_ROOT
-  ? path.resolve(process.env.APP_ROOT)
-  : process.cwd();
+    ? path.resolve(process.env.APP_ROOT)
+    : process.cwd();
 
 /* -------------------------------------------------------------------------- */
 /* ✅ LOGGING (archivo + consola filtrada)                                     */
@@ -137,14 +137,14 @@ function log(level, msg, extra) {
   const line = extra ? `${base} | ${redactSecrets(JSON.stringify(extra))}` : base;
 
   // Siempre a archivo
-  logToFile(line).catch(() => {});
+  logToFile(line).catch(() => { });
 
   // A consola solo si corresponde
-if (shouldPrint(level)) {
-  if (level === "warn") ORIG_CONSOLE.warn(line);
-  else if (level === "error") ORIG_CONSOLE.error(line);
-  else ORIG_CONSOLE.log(line);
-}
+  if (shouldPrint(level)) {
+    if (level === "warn") ORIG_CONSOLE.warn(line);
+    else if (level === "error") ORIG_CONSOLE.error(line);
+    else ORIG_CONSOLE.log(line);
+  }
 
 }
 
@@ -287,7 +287,7 @@ async function snapshot(page, outDir, prefix, { maxWidth = 2400 } = {}) {
       document.documentElement.style.overflowX = "visible";
       document.body.style.overflowX = "visible";
     });
-  } catch {}
+  } catch { }
 
   try {
     const dims = await page.evaluate(() => {
@@ -310,7 +310,7 @@ async function snapshot(page, outDir, prefix, { maxWidth = 2400 } = {}) {
       });
       await sleep(120);
     }
-  } catch {}
+  } catch { }
 
   const html = await page.content();
   const htmlPath = path.join(outDir, `${prefix}_${stamp}.html`);
@@ -746,7 +746,7 @@ async function selectCounterRolIfPresent(page, tipoRes, { timeout = 12000 } = {}
       if (!modal) return;
       modal.querySelectorAll('[data-autofill="counterrol"]').forEach((x) => x.removeAttribute("data-autofill"));
     });
-  } catch {}
+  } catch { }
 
   if (res.ok) {
     console.log(
@@ -868,12 +868,12 @@ async function hardBlurActiveElement(page) {
     if (ae && typeof ae.blur === "function") ae.blur();
     try {
       ae && ae.dispatchEvent && ae.dispatchEvent(new Event("blur", { bubbles: true }));
-    } catch {}
+    } catch { }
     try {
       document.body && document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
       document.body && document.body.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
       document.body && document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    } catch {}
+    } catch { }
   });
 }
 
@@ -1884,6 +1884,188 @@ async function clickCrearUsuarioSiCorresponde(page) {
 }
 
 /* -------------------------------------------------------------------------- */
+/* ✅ NAVEGACIÓN A MÓDULO USUARIOS                                             */
+/* -------------------------------------------------------------------------- */
+
+async function waitForCreationResult(page) {
+  important("⏳ Verificando resultado de creación...");
+
+  // Usamos evaluate para chequear el DOM
+  const result = await page.evaluate(async () => {
+    const checkInterval = 500;
+    const maxTime = 10000;
+    let elapsed = 0;
+
+    return new Promise(resolve => {
+      const timer = setInterval(() => {
+        elapsed += checkInterval;
+        const modal = document.querySelector("#adminUsersModal");
+
+        // 1. Success: Modal gone or hidden (means saved & closed)
+        // Validamos que NO tenga la clase show y Display none
+        if (!modal || !modal.classList.contains("show") || modal.style.display === "none") {
+          clearInterval(timer);
+          resolve({ ok: true, msg: "Modal cerrado correctamente." });
+          return;
+        }
+
+        // 2. Failure: Look for typical error feedbacks (bootstrap/custom)
+        // Adjust selectors if needed: .invalid-feedback, .alert, .toast-error
+        const errors = Array.from(modal.querySelectorAll(".invalid-feedback, .alert-danger, .text-danger, .toast-error"));
+        // Filtramos los que son visibles
+        const visibleError = errors.find(e => e.offsetParent !== null && e.innerText.trim().length > 0);
+
+        if (visibleError) {
+          clearInterval(timer);
+          resolve({ ok: false, msg: "Error detectado en modal: " + visibleError.innerText.trim() });
+          return;
+        }
+
+        // Timeout
+        if (elapsed >= maxTime) {
+          clearInterval(timer);
+          resolve({ ok: false, warning: "Tiempo de espera agotado, el modal sigue abierto." });
+        }
+      }, checkInterval);
+    });
+  });
+
+  if (result.ok) {
+    important(`✅ ÉXITO: Usuario creado. (${result.msg})`);
+    // No lanzamos error, el flujo sigue y el main loop reportará "✅ Usuario OK" al server
+  } else if (result.warning) {
+    log("warn", `⚠️ ALERTA: ${result.warning}`);
+    // Dependiendo de lo estricto, podríamos perdonarlo o fallar. 
+    // Si el modal sigue abierto, probablemente NO se guardó. Lanzamos error.
+    throw new Error(result.warning);
+  } else {
+    log("error", `❌ ERROR: No se pudo crear el usuario. ${result.msg}`);
+    throw new Error(result.msg);
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* ✅ CLOSE BLOCKING MODALS                                                   */
+/* -------------------------------------------------------------------------- */
+
+async function closeUnexpectedModals(page) {
+  try {
+    const modalSel = "#FileUploaderModal";
+    const isVisible = await page.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      return el && (el.classList.contains("show") || el.style.display === "block");
+    }, modalSel);
+
+    if (isVisible) {
+      console.log("⚠️ Detectado modal bloqueante (#FileUploaderModal). Cerrando...");
+
+      // Intentar cerrar con botón "Cerrar" o "X"
+      const closed = await page.evaluate((sel) => {
+        const m = document.querySelector(sel);
+        if (!m) return false;
+
+        const closeBtns = Array.from(m.querySelectorAll(".botonCerrar, .close, button.close"));
+        const btn = closeBtns.find(b => b.offsetParent !== null); // visible
+        if (btn) {
+          btn.click();
+          return true;
+        }
+        return false;
+      }, modalSel);
+
+      if (closed) {
+        await sleep(1000);
+        console.log("✅ Modal cerrado.");
+      } else {
+        console.log("⚠️ No se pudo clickear botón de cerrar en el modal bloqueante.");
+      }
+    }
+  } catch (e) {
+    console.log("⚠️ Error intentando cerrar modales bloqueantes:", e.message);
+  }
+}
+
+async function navigateToUsersModule(page) {
+  console.log("🧭 Navegando al módulo de Usuarios (Selector RouterLink)...");
+
+  // 0. Limpiar modales molestos antes de empezar
+  await closeUnexpectedModals(page);
+
+  const crearBtnSel = 'button.btn.btn-outline-secondary.btn-timbra-one.mr-sm-3';
+
+  // 1. Chequear si YA estamos ahí
+  try {
+    const yaExiste = await page.$(crearBtnSel);
+    if (yaExiste) {
+      const visible = await page.evaluate(el => {
+        const s = window.getComputedStyle(el);
+        return s && s.display !== 'none' && s.visibility !== 'hidden' && el.offsetParent !== null;
+      }, yaExiste);
+
+      if (visible) {
+        console.log("✅ Ya estamos en el módulo (botón Crear detectado al inicio).");
+        return;
+      }
+    }
+  } catch { }
+
+  // 2. Navegar (USANDO SELECTOR EXACTO DEL USUARIO)
+  let navigated = false;
+  try {
+    console.log("👉 Intentando click en selector [routerlink='/adminUsers']...");
+    await page.waitForSelector("span[routerlink='/adminUsers']", { timeout: 6000 });
+    await page.click("span[routerlink='/adminUsers']");
+    navigated = true;
+  } catch (e) {
+    console.log("⚠️ No se encontró selector routerlink. Probando texto exacto 'Admin. de usuarios'...");
+    try {
+      await clickByText(page, "Admin. de usuarios", { timeout: 6000 });
+      navigated = true;
+    } catch (e2) {
+      console.log("⚠️ Fallaron los clicks de navegación (routerlink y texto).");
+    }
+  }
+
+  // Esperar carga
+  await sleep(2500);
+  await closeUnexpectedModals(page);
+
+  // 3. Validar si caímos en el módulo incorrecto (Documentos/Archivos) - Solo por si acaso
+  const isWrongModule = await page.evaluate(() => {
+    if (document.querySelector("#dataTableDocuments")) return true;
+    const title = document.querySelector(".modal-title, h1, h2, h3, h4");
+    if (title && (title.textContent || "").includes("archivos")) return true;
+    return false;
+  });
+
+  if (isWrongModule) {
+    console.log("⚠️ Detectado módulo INCORRECTO (Documentos).");
+  }
+
+  // Snapshot de debug
+  const outDir = path.join(path.resolve(process.env.APP_ROOT || process.cwd(), "HTML"), `run_${RUN_ID}`);
+  await snapshot(page, outDir, "debug_post_nav_users");
+
+  // 4. Validar llegada final
+  try {
+    await page.waitForSelector(crearBtnSel, { timeout: 15000 });
+    console.log("✅ Ya estamos en el módulo (botón Crear visible).");
+  } catch {
+    console.log("⚠️ No se detectó botón Crear. Dump de botones:");
+
+    // Debug: Listar botones visibles
+    const buttons = await page.evaluate(() => {
+      const bs = Array.from(document.querySelectorAll("button, a.btn"));
+      return bs.map(b => ({
+        text: (b.innerText || "").trim(),
+        visible: (b.offsetParent !== null)
+      })).filter(x => x.visible);
+    });
+    console.log("Validation: Botones visibles:", JSON.stringify(buttons, null, 2));
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 /* ✅ UTIL: Abrir modal "Crear usuario" (para masivo)                           */
 /* -------------------------------------------------------------------------- */
 
@@ -1910,6 +2092,9 @@ async function processOneUserFlow(page, {
   camposPath,
   AUTO_SAVE_CAMPOS,
 } = {}) {
+  // 0) Navegar a Módulo Usuarios (Fix)
+  await navigateToUsersModule(page);
+
   // 1) Abrir modal Crear usuario
   await openCrearUsuarioModal(page);
   await snapshot(page, outDir, "crearUsuario");
@@ -1967,7 +2152,7 @@ async function processOneUserFlow(page, {
 
     try {
       await activateTabByText(page, "Datos de artículos");
-    } catch {}
+    } catch { }
     const artCatalog = await extractCamposSAPGeneric(page, "#ModulosArticulos");
 
     const camposCatalog = [...bpCatalog, ...artCatalog];
@@ -2000,7 +2185,7 @@ async function processOneUserFlow(page, {
 
       try {
         await activateTabByText(page, "Datos de artículos");
-      } catch {}
+      } catch { }
       const logsART = await applyCamposTemplateGeneric(page, "#ModulosArticulos", templateObj);
       console.log(`🧩 DATOS ARTÍCULOS aplicados. Filas tocadas: ${logsART.touched}`);
 
@@ -2010,7 +2195,7 @@ async function processOneUserFlow(page, {
       if (AUTO_SAVE_CAMPOS) {
         try {
           await activateTabByText(page, "Campos SAP");
-        } catch {}
+        } catch { }
         await clickButtonInContainerByText(page, "#ModulosSociosDeNegocios", "GUARDAR CAMPOS S. DE NEGOCIOS", {
           timeout: 12000,
         });
@@ -2019,7 +2204,7 @@ async function processOneUserFlow(page, {
 
         try {
           await activateTabByText(page, "Datos de artículos");
-        } catch {}
+        } catch { }
         await clickButtonInContainerByText(page, "#ModulosArticulos", "GUARDAR DATOS DE ARTÍCULOS", {
           timeout: 12000,
         });
@@ -2042,6 +2227,8 @@ async function processOneUserFlow(page, {
   if (r?.clicked) {
     console.log(`⏳ Esperando CREATE_WAIT_MS=${waitMs}ms...`);
     await sleep(waitMs);
+    // Verificar si funcionó
+    await waitForCreationResult(page);
   } else {
     await sleep(800);
   }
@@ -2116,7 +2303,7 @@ async function processOneUserFlow(page, {
   page.setDefaultNavigationTimeout(120000);
   await page.setViewport({ width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT, deviceScaleFactor: DEVICE_SCALE_FACTOR });
 
-   await page.setUserAgent(
+  await page.setUserAgent(
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
   );
 
@@ -2143,7 +2330,7 @@ async function processOneUserFlow(page, {
         important("✅ Usando Chromium de Playwright", { executablePath: p });
         return p;
       }
-    } catch {}
+    } catch { }
 
     // 3) Dejar que Puppeteer decida (solo funciona si descargó Chromium)
     important("ℹ️ Usando Chromium default de Puppeteer (si existe).");
@@ -2179,7 +2366,7 @@ async function processOneUserFlow(page, {
         }
         return req.continue();
       } catch {
-        try { req.continue(); } catch {}
+        try { req.continue(); } catch { }
       }
     });
 
@@ -2289,7 +2476,7 @@ async function processOneUserFlow(page, {
       });
 
       if (didClick) clicked = true;
-    } catch {}
+    } catch { }
 
     if (!clicked) {
       // fallback: intenta selector submit
@@ -2301,7 +2488,7 @@ async function processOneUserFlow(page, {
             clicked = true;
             break;
           }
-        } catch {}
+        } catch { }
       }
     }
 
@@ -2366,7 +2553,7 @@ async function processOneUserFlow(page, {
   // y relanzamos con path estable si aplica.
   const execPath = await resolveExecutablePathMaybe();
 
-  await browser.close().catch(() => {});
+  await browser.close().catch(() => { });
 
   const browser2 = await puppeteer.launch({
     headless: HEADLESS,
@@ -2395,7 +2582,7 @@ async function processOneUserFlow(page, {
       const txt = msg.text();
       // todo a archivo, filtrado a consola por tu logger
       log("debug", `[BROWSER:${msg.type()}] ${txt}`);
-    } catch {}
+    } catch { }
   });
   page2.on("pageerror", (err) => log("warn", "pageerror", { err: String(err?.message || err) }));
 
@@ -2471,9 +2658,9 @@ async function processOneUserFlow(page, {
       await withUserEnv(u, async () => {
         try {
           await processOneUserFlow(page2, { outDir, permisosPath, camposPath, AUTO_SAVE_CAMPOS });
-          important("✅ Usuario OK", { row: u.index, code: u.NEW_USER_CODE });
+          important("✅ OK usuario", { row: u.index, code: u.NEW_USER_CODE });
         } catch (e) {
-          log("error", "❌ Usuario falló", { row: u.index, err: String(e?.message || e) });
+          log("error", "❌ FAIL usuario", { row: u.index, err: String(e?.message || e) });
           await snapshot(page2, outDir, `ERR_user_row_${u.index}`);
           // sigue con el siguiente (no aborta todo)
         }
@@ -2494,12 +2681,12 @@ async function processOneUserFlow(page, {
     // eslint-disable-next-line no-constant-condition
     while (true) await sleep(1000);
   } else {
-    await browser2.close().catch(() => {});
+    await browser2.close().catch(() => { });
     important("✅ FIN OK (browser cerrado)");
   }
 })().catch(async (e) => {
   try {
     log("error", "💥 ERROR FATAL", { err: String(e?.message || e) });
-  } catch {}
+  } catch { }
   process.exitCode = 1;
 });
