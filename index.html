@@ -769,6 +769,10 @@
                 <span class="mono ms-2">#${x.index}</span>
                 <b class="ms-2">${x.code || ""}</b>
               </div>
+              
+              <!-- MENSAJE DE PROGRESO -->
+              ${x.msg ? `<div class="ms-auto text-primary small fw-bold"><i class="fas fa-info-circle me-1"></i>${x.msg}</div>` : ""}
+
               <div class="d-flex gap-2">
                 <button class="btn btn-sm btn-outline-dark" onclick="openLog('${job.id
               }', ${x.index})">

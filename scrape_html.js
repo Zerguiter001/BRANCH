@@ -2091,10 +2091,18 @@ async function processOneUserFlow(page, {
   permisosPath,
   camposPath,
   AUTO_SAVE_CAMPOS,
+  rowIndex,
 } = {}) {
+  const logProgress = (msg) => {
+    if (rowIndex) important(`ℹ️ [ROW ${rowIndex}] MSG:${msg}`);
+    else console.log(`ℹ️ MSG:${msg}`);
+  };
+
+  logProgress("Navegando al módulo Usuarios...");
   // 0) Navegar a Módulo Usuarios (Fix)
   await navigateToUsersModule(page);
 
+  logProgress("Abriendo modal 'Crear usuario'...");
   // 1) Abrir modal Crear usuario
   await openCrearUsuarioModal(page);
   await snapshot(page, outDir, "crearUsuario");
@@ -2657,7 +2665,8 @@ async function processOneUserFlow(page, {
 
       await withUserEnv(u, async () => {
         try {
-          await processOneUserFlow(page2, { outDir, permisosPath, camposPath, AUTO_SAVE_CAMPOS });
+          // AQUI usamos el rowIndex
+          await processOneUserFlow(page2, { outDir, permisosPath, camposPath, AUTO_SAVE_CAMPOS, rowIndex: u.index });
           important("✅ OK usuario", { row: u.index, code: u.NEW_USER_CODE });
         } catch (e) {
           log("error", "❌ FAIL usuario", { row: u.index, err: String(e?.message || e) });

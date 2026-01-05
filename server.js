@@ -91,7 +91,7 @@ async function persistJob(job) {
   try {
     await fs.ensureDir(path.join(RUNS_DIR, job.id));
     await fs.writeJson(jobFilePath(job.id), job, { spaces: 2 });
-  } catch {}
+  } catch { }
 }
 
 async function loadJobFromDisk(jobId) {
@@ -107,7 +107,7 @@ async function loadJobFromDisk(jobId) {
 function touchJob(job, patch = {}) {
   const next = { ...job, ...patch, updatedAt: new Date().toISOString() };
   jobs.set(job.id, next);
-  persistJob(next).catch(() => {});
+  persistJob(next).catch(() => { });
   return next;
 }
 
@@ -376,9 +376,10 @@ app.post("/api/jobs", upload.single("excel"), async (req, res) => {
           existing.status = "running";
           existing.code = code || existing.code;
           existing.rowDir = rowDir || existing.rowDir;
+          existing.msg = "Iniciando..."; // Reset msg
           existing.error = null;
         } else if (idx) {
-          results.push({ index: idx, code, status: "running", rowDir });
+          results.push({ index: idx, code, status: "running", rowDir, msg: "Iniciando..." });
         }
 
         results.sort((a, b) => a.index - b.index);
@@ -389,12 +390,33 @@ app.post("/api/jobs", upload.single("excel"), async (req, res) => {
         return;
       }
 
+      // LOG DE PROGRESO (NUEVO)
+      // "ℹ️ [ROW 1] MSG:Navegando..."
+      if (msg.startsWith("ℹ️ [ROW")) {
+        const m = msg.match(/ℹ️ \[ROW (\d+)\] MSG:(.*)/);
+        if (m) {
+          const idx = Number(m[1]);
+          const text = (m[2] || "").trim();
+
+          const results = Array.isArray(job.results) ? [...job.results] : [];
+          const r = results.find((x) => x.index === idx);
+          if (r) {
+            r.msg = text;
+            job = touchJob(job, { results });
+          }
+        }
+        return;
+      }
+
       // OK
       if (msg.startsWith("✅ OK usuario")) {
         // marca último "running" como ok
         const results = Array.isArray(job.results) ? [...job.results] : [];
         const r = results.find((x) => x.status === "running") || results[results.length - 1];
-        if (r) r.status = "ok";
+        if (r) {
+          r.status = "ok";
+          r.msg = "Usuario creado con éxito"; // Mensaje final explícito
+        }
         const done = Number(job.doneRows || 0) + 1;
         job = touchJob(job, { results, doneRows: done });
         return;
@@ -407,6 +429,7 @@ app.post("/api/jobs", upload.single("excel"), async (req, res) => {
         if (r) {
           r.status = "error";
           r.error = extra?.error || "FAIL";
+          r.msg = r.error; // Mostrar el error como último mensaje
         }
         const done = Number(job.doneRows || 0) + 1;
         job = touchJob(job, { results, doneRows: done });
@@ -480,7 +503,7 @@ app.get("/api/jobs/:id/row/:index/log", async (req, res) => {
           if (await fs.pathExists(candidate)) logFile = candidate;
         }
       }
-    } catch {}
+    } catch { }
   }
 
   if (!logFile || !(await fs.pathExists(logFile))) return res.status(404).send("No hay log aún");
